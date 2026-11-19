@@ -12,8 +12,9 @@ SET claimed_at = now()
 WHERE id IN (
     SELECT id
     FROM api_facilitysearchoutbox
-    WHERE claimed_at IS NULL
-       OR claimed_at < now() - make_interval(secs => %(lease)s)
+    WHERE parked_at IS NULL
+      AND (claimed_at IS NULL
+           OR claimed_at < now() - make_interval(secs => %(lease)s))
     ORDER BY id
     LIMIT %(limit)s
     FOR UPDATE SKIP LOCKED
@@ -37,6 +38,19 @@ RELEASE_SQL = """
 UPDATE api_facilitysearchoutbox
 SET claimed_at = NULL
 WHERE id = ANY(%(ids)s)
+"""
+
+
+# Count one rejected attempt; park the entry once it reaches the limit,
+# otherwise give it back for the next batch.
+FAIL_SQL = """
+UPDATE api_facilitysearchoutbox
+SET attempts = attempts + 1,
+    last_error = %(error)s,
+    parked_at = CASE WHEN attempts + 1 >= %(max_attempts)s
+                     THEN now() ELSE NULL END
+WHERE id = %(id)s
+RETURNING parked_at IS NOT NULL
 """
 
 
@@ -85,4 +99,38 @@ def release(entry_ids: List[int]) -> None:
             '[Facility search indexer] Could not release %s entries; '
             'they will be retried when their lease expires.',
             len(entry_ids),
+        )
+
+
+def fail(entries_with_errors, max_attempts: int) -> int:
+    """
+    Record a rejected attempt for each (entry id, error) pair, park the
+    ones at the limit and release the rest. Returns how many were parked.
+    """
+    parked, retry = 0, []
+    with connection.cursor() as cursor:
+        for entry_id, error in entries_with_errors:
+            cursor.execute(FAIL_SQL, {'id': entry_id, 'error': str(error),
+                                      'max_attempts': max_attempts})
+            if cursor.fetchone()[0]:
+                parked += 1
+            else:
+                retry.append(entry_id)
+    release(retry)
+    return parked
+
+
+def enqueue(facility_ids) -> None:
+    """Ask the indexer to re-settle these facilities from their rows."""
+    if not facility_ids:
+        return
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO api_facilitysearchoutbox
+                (facility_id, created_at, attempts, last_error)
+            SELECT unnest(%s::varchar[]), now(), 0, ''
+            ON CONFLICT (facility_id) WHERE claimed_at IS NULL DO NOTHING
+            """,
+            [list(facility_ids)],
         )

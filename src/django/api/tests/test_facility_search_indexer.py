@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from django.contrib.gis.geos import Point
 from django.test import TestCase
@@ -6,7 +6,6 @@ from django.utils import timezone
 
 from api.facility_search.indexer import (
     FacilitySearchIndexer,
-    IndexingError,
     failed_ids,
     write_targets,
 )
@@ -51,7 +50,7 @@ class FailedIdsTest(TestCase):
             {'index': {'_id': 'D', 'status': 201}},
         ]}
 
-        self.assertEqual(failed_ids(response), {'C'})
+        self.assertEqual(set(failed_ids(response)), {'C'})
 
 
 class FacilitySearchIndexerTest(FacilityFactoryMixin, TestCase):
@@ -114,16 +113,16 @@ class FacilitySearchIndexerTest(FacilityFactoryMixin, TestCase):
         entry = FacilitySearchOutbox.objects.get()
         self.assertIsNone(entry.claimed_at)
 
-    def test_failed_documents_are_kept_and_reported(self):
+    def test_failed_documents_are_kept_for_retry(self):
         client = fake_client(bulk_response={'errors': True, 'items': [
             {'index': {'_id': self.facility.id, 'status': 400}},
         ]})
 
-        with self.assertRaises(IndexingError):
-            FacilitySearchIndexer(client).process_batch()
+        FacilitySearchIndexer(client).process_batch()
 
-        self.assertTrue(FacilitySearchOutbox.objects.filter(
-            facility_id=self.facility.id).exists())
+        entry = FacilitySearchOutbox.objects.get(facility_id=self.facility.id)
+        self.assertEqual(entry.attempts, 1)
+        self.assertIsNone(entry.claimed_at)
 
     def test_without_an_index_entries_are_dropped(self):
         client = fake_client(aliases={})
@@ -159,3 +158,112 @@ class FacilitySearchIndexerTest(FacilityFactoryMixin, TestCase):
 
         self.assertEqual(sleeps[0], 1.0)
         self.assertFalse(FacilitySearchOutbox.objects.exists())
+
+
+class PoisonEntryTest(FacilityFactoryMixin, TestCase):
+    def setUp(self):
+        super().setUp()
+        self.bad = self.create_facility(name='Bad')
+        self.good = self.create_facility(name='Good')
+
+    def client_failing(self, facility_id):
+        client = fake_client()
+
+        def bulk(body, **kwargs):
+            items = []
+            for action in body:
+                op = next(iter(action)) if len(action) == 1 else None
+                meta = action.get(op) if op else None
+                if op in ('index', 'delete'):
+                    status = 400 if meta['_id'] == facility_id else 201
+                    items.append({op: {'_id': meta['_id'], 'status': status,
+                                       'error': 'mapper_parsing_exception'}})
+            return {'errors': True, 'items': items}
+
+        client.bulk.side_effect = bulk
+        return client
+
+    def test_failing_entry_is_parked_and_others_keep_flowing(self):
+        from api.facility_search.indexer import MAX_ATTEMPTS
+        client = self.client_failing(self.bad.id)
+        indexer = FacilitySearchIndexer(client)
+
+        for _ in range(MAX_ATTEMPTS + 2):
+            indexer.process_batch()  # item failures must not raise
+
+        self.assertFalse(FacilitySearchOutbox.objects.filter(
+            facility_id=self.good.id).exists())
+        bad = FacilitySearchOutbox.objects.get(facility_id=self.bad.id)
+        self.assertEqual(bad.attempts, MAX_ATTEMPTS)
+        self.assertIsNotNone(bad.parked_at)
+        self.assertIn('mapper_parsing_exception', bad.last_error)
+        self.assertEqual(indexer.process_batch(), 0)
+
+    def test_a_new_change_to_a_parked_facility_is_retried(self):
+        from api.facility_search.indexer import MAX_ATTEMPTS
+        indexer = FacilitySearchIndexer(self.client_failing(self.bad.id))
+        for _ in range(MAX_ATTEMPTS):
+            indexer.process_batch()
+
+        self.bad.name = 'Fixed'
+        self.bad.save()
+
+        pending = FacilitySearchOutbox.objects.filter(
+            facility_id=self.bad.id, parked_at__isnull=True)
+        self.assertEqual(pending.count(), 1)
+
+    def test_whole_batch_failures_do_not_count_as_attempts(self):
+        client = fake_client()
+        client.bulk.side_effect = ConnectionError('down')
+
+        for _ in range(3):
+            with self.assertRaises(ConnectionError):
+                FacilitySearchIndexer(client).process_batch()
+
+        self.assertEqual(
+            set(FacilitySearchOutbox.objects.values_list('attempts',
+                                                         flat=True)),
+            {0},
+        )
+
+
+class RunLoopTest(TestCase):
+    def indexer(self, outcomes):
+        indexer = FacilitySearchIndexer(MagicMock())
+        indexer.batch_size = 10
+        results = iter(outcomes)
+
+        def process_batch():
+            outcome = next(results)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+        indexer.process_batch = process_batch
+        return indexer
+
+    def test_backoff_resets_after_a_successful_batch(self):
+        sleeps = []
+        indexer = self.indexer([ConnectionError(), ConnectionError(), 10,
+                                ConnectionError(), KeyboardInterrupt()])
+        indexer.sleep = sleeps.append
+
+        with self.assertRaises(KeyboardInterrupt):
+            indexer.run()
+
+        self.assertEqual(sleeps, [1.0, 2.0, 1.0])
+
+    def test_connections_are_refreshed_every_iteration(self):
+        indexer = self.indexer([10, ConnectionError(), 10,
+                                KeyboardInterrupt()])
+        indexer.sleep = lambda seconds: None
+
+        with patch('api.facility_search.indexer.close_old_connections') \
+                as close, \
+                patch('api.facility_search.indexer.connection') as conn, \
+                self.assertRaises(KeyboardInterrupt):
+            conn.in_atomic_block = False
+            indexer.run()
+
+        # Top of each of the 4 iterations, plus once after the failure.
+        self.assertEqual(close.call_count, 5)

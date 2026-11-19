@@ -33,6 +33,24 @@ class FacilitySearchOutbox(models.Model):
             'nothing.'
         ),
     )
+    attempts = models.PositiveIntegerField(
+        default=0,
+        help_text=(
+            "Bulk requests in which this facility's document was "
+            'rejected. Whole-request failures (cluster unreachable) do '
+            'not count.'
+        ),
+    )
+    parked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            'Set after too many rejected attempts; the entry is no longer '
+            'claimed. A later change to the facility enqueues a fresh '
+            'entry. Parked entries need a look (see last_error).'
+        ),
+    )
+    last_error = models.TextField(blank=True, default='')
 
     class Meta:
         constraints = [
@@ -46,5 +64,6 @@ class FacilitySearchOutbox(models.Model):
             models.Index(
                 fields=['claimed_at', 'id'],
                 name='api_fso_claim_idx',
+                condition=Q(parked_at__isnull=True),
             ),
         ]

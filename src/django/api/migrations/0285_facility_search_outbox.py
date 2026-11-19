@@ -30,8 +30,9 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    INSERT INTO api_facilitysearchoutbox (facility_id, created_at)
-    SELECT DISTINCT changed_rows.id, now()
+    INSERT INTO api_facilitysearchoutbox
+        (facility_id, created_at, attempts, last_error)
+    SELECT DISTINCT changed_rows.id, now(), 0, ''
     FROM changed_rows
     ON CONFLICT (facility_id) WHERE claimed_at IS NULL DO NOTHING;
     RETURN NULL;
@@ -104,9 +105,29 @@ class Migration(migrations.Migration):
                     ),
                     null=True,
                 )),
+                ('attempts', models.PositiveIntegerField(
+                    default=0,
+                    help_text=(
+                        "Bulk requests in which this facility's document "
+                        'was rejected. Whole-request failures (cluster '
+                        'unreachable) do not count.'
+                    ),
+                )),
+                ('parked_at', models.DateTimeField(
+                    blank=True,
+                    help_text=(
+                        'Set after too many rejected attempts; the entry '
+                        'is no longer claimed. A later change to the '
+                        'facility enqueues a fresh entry. Parked entries '
+                        'need a look (see last_error).'
+                    ),
+                    null=True,
+                )),
+                ('last_error', models.TextField(blank=True, default='')),
             ],
             options={
                 'indexes': [models.Index(
+                    condition=Q(parked_at__isnull=True),
                     fields=['claimed_at', 'id'],
                     name='api_fso_claim_idx',
                 )],
