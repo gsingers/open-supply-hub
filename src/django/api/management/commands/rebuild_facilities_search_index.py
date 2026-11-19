@@ -1,4 +1,4 @@
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
 from api.facility_search.index_definition import (
     read_alias,
@@ -29,6 +29,14 @@ class Command(BaseCommand):
         parser.add_argument('--status', action='store_true')
         parser.add_argument('--point-alias-to', type=int, metavar='VERSION',
                             help='Point the alias at an existing version.')
+        parser.add_argument(
+            '--accept-stale', action='store_true',
+            help=('Required with --point-alias-to. A previous index stops '
+                  'receiving changes when it is swapped out, so it serves '
+                  'the data as of that swap. A fresh rebuild (with the '
+                  'code version wanted) is the way to an up-to-date '
+                  'index.'),
+        )
 
     def handle(self, *args, **options):
         client = OpenSearchServiceConnection().client
@@ -39,8 +47,19 @@ class Command(BaseCommand):
             return
         if options['point_alias_to'] is not None:
             index = concrete_index_name(options['point_alias_to'])
+            if not options['accept_stale']:
+                raise CommandError(
+                    f'{index} has not received changes since it was '
+                    'swapped out, so /map would serve stale results. Pass '
+                    '--accept-stale to use it anyway (an emergency '
+                    'rollback), or run a fresh rebuild instead.'
+                )
             old = swap_alias(client, index)
-            self.stdout.write(f'{read_alias()} -> {index} (was {old})')
+            self.stdout.write(self.style.WARNING(
+                f'{read_alias()} -> {index} (was {old}). {index} is stale '
+                'until the outbox indexer catches it up from new changes; '
+                'run a rebuild to bring it fully current.'
+            ))
             return
         rebuild(
             client,

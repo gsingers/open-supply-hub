@@ -31,9 +31,11 @@ from api.facility_search.index_definition import (
     index_body,
     parse_version,
 )
+from api.facility_search import outbox
 from api.facility_search.indexer import (
     FacilitySearchIndexer,
     SETTLED_STATUSES,
+    failed_ids,
 )
 
 log = logging.getLogger(__name__)
@@ -102,18 +104,39 @@ def _send(client, actions: list, timeout: float) -> int:
 
 
 def delete_orphans(client, index: str, timeout: float) -> int:
-    """Delete documents whose api_facilityindex row no longer exists."""
+    """
+    Delete documents whose api_facilityindex row no longer exists.
+
+    The indexer keeps writing to the index while this runs, so a document
+    can appear after the live ids were read. Candidates are therefore
+    re-checked against Postgres just before the delete, and the delete
+    carries the sequence value read before that check: a document written
+    from a row versioned after it rejects the delete (409). Every deleted
+    id is also put back on the outbox, so the indexer settles whatever is
+    left of the race from the row's state.
+    """
+    version = documents.delete_version()
     live_ids = set(documents.indexable_rows().values_list('id', flat=True))
-    orphans = [hit['_id'] for hit in scan(client, index=index,
-                                          query={'_source': False})
-               if hit['_id'] not in live_ids]
-    if orphans:
-        version = documents.delete_version()
-        client.bulk(body=[{'delete': {'_index': index, '_id': os_id,
-                                      'version': version,
-                                      'version_type': 'external_gte'}}
-                          for os_id in orphans],
-                    request_timeout=timeout)
+    candidates = {hit['_id'] for hit in scan(client, index=index,
+                                             query={'_source': False})
+                  if hit['_id'] not in live_ids}
+    if not candidates:
+        return 0
+    orphans = sorted(candidates - set(
+        documents.indexable_rows().filter(id__in=candidates)
+        .values_list('id', flat=True)
+    ))
+    if not orphans:
+        return 0
+    response = client.bulk(body=[{'delete': {
+        '_index': index, '_id': os_id, 'version': version,
+        'version_type': 'external_gte',
+    }} for os_id in orphans], request_timeout=timeout)
+    failed = failed_ids(response) if response.get('errors') else {}
+    if failed:
+        raise RebuildError(f'{len(failed)} orphan deletes failed, first: '
+                           f'{next(iter(failed.items()))}')
+    outbox.enqueue(orphans)
     return len(orphans)
 
 
@@ -143,18 +166,19 @@ def rebuild(client, version: Optional[int] = None, batch_size: int = 2000,
     report(f'Created {index}; loading api_facilityindex.')
     try:
         _load(client, index, batch_size, replicas, timeout, report)
+        FacilitySearchIndexer(client).run(once=True)
+        old = swap_alias(client, index) if swap else None
     except Exception:
         # An abandoned build must not keep receiving (and possibly
         # failing) the indexer's writes. The index is kept to inspect.
-        client.indices.delete_alias(index=index, name=building_alias())
+        client.indices.delete_alias(index=index, name=building_alias(),
+                                    ignore=[404])
         report(f'Build of {index} failed; it no longer receives changes.')
         raise
 
-    FacilitySearchIndexer(client).run(once=True)
     if not swap:
         report(f'{index} is ready; the read alias was not moved.')
         return index
-    old = swap_alias(client, index)
     report(f'{read_alias()} now points at {index} (was {old or "nothing"}).')
     if delete_old:
         for old_index in old:

@@ -89,3 +89,73 @@ class FailedRebuildTest(LiveIndexMixin, FacilityFactoryMixin, TestCase):
             rebuild(self.client, replicas=0, report=lambda _: None)
 
         self.assertEqual(alias_indices(self.client, building_alias()), [])
+
+
+@requires_opensearch
+class RebuildRaceTest(LiveIndexMixin, FacilityFactoryMixin, TestCase):
+    def test_document_indexed_during_the_orphan_scan_survives(self):
+        from unittest.mock import patch
+        from opensearchpy.helpers import scan as real_scan
+        from api.facility_search.rebuild import delete_orphans
+        index = rebuild(self.client, replicas=0, report=lambda _: None)
+        created = {}
+
+        def scan_after_a_concurrent_write(client, **kwargs):
+            # The indexer writes a new facility after live ids were read.
+            facility = self.create_facility(name='Written mid-scan')
+            created['id'] = facility.id
+            FacilitySearchIndexer(self.client).run(once=True)
+            self.client.indices.refresh(index=index)
+            return real_scan(client, **kwargs)
+
+        with patch('api.facility_search.rebuild.scan',
+                   side_effect=scan_after_a_concurrent_write):
+            delete_orphans(self.client, index, timeout=10)
+
+        self.client.indices.refresh(index=index)
+        self.assertTrue(self.client.exists(index=index, id=created['id']))
+
+    def test_failed_drain_or_swap_releases_the_building_alias(self):
+        from unittest.mock import patch
+        self.create_facility()
+        for target in ('api.facility_search.rebuild.FacilitySearchIndexer'
+                       '.run',
+                       'api.facility_search.rebuild.swap_alias'):
+            with self.subTest(target), \
+                    patch(target, side_effect=RuntimeError('boom')), \
+                    self.assertRaises(RuntimeError):
+                rebuild(self.client, replicas=0, report=lambda _: None)
+            self.assertEqual(alias_indices(self.client, building_alias()),
+                             [])
+
+
+class OrphanDeleteResponseTest(FacilityFactoryMixin, TestCase):
+    def test_rejected_orphan_deletes_fail_the_rebuild(self):
+        from unittest.mock import MagicMock, patch
+        from api.facility_search.rebuild import RebuildError, delete_orphans
+        client = MagicMock()
+        client.bulk.return_value = {'errors': True, 'items': [
+            {'delete': {'_id': 'XX', 'status': 403, 'error': 'blocked'}}]}
+
+        with patch('api.facility_search.rebuild.scan',
+                   return_value=[{'_id': 'XX'}]), \
+                self.assertRaises(RebuildError):
+            delete_orphans(client, 'facilities-v9', timeout=10)
+
+
+class PointAliasCommandTest(TestCase):
+    def test_rollback_requires_accepting_a_stale_index(self):
+        from unittest.mock import patch
+        from django.core.management import CommandError, call_command
+        with patch('api.management.commands.rebuild_facilities_search_index'
+                   '.OpenSearchServiceConnection'), \
+                patch('api.management.commands.'
+                      'rebuild_facilities_search_index.swap_alias') as swap:
+            with self.assertRaises(CommandError):
+                call_command('rebuild_facilities_search_index',
+                             point_alias_to=3)
+            swap.assert_not_called()
+
+            call_command('rebuild_facilities_search_index',
+                         point_alias_to=3, accept_stale=True)
+            swap.assert_called_once()
