@@ -451,12 +451,13 @@ CACHES = {
     },
 }
 
-# OpenSearch client. The defaults bound how long a degraded cluster can
-# hold a Gunicorn worker: without them opensearch-py waits 10 s per try.
+# OpenSearch client. The defaults are opensearch-py's own (10 s, 3 retries
+# on connection errors, none on timeouts); /map requests use a separate
+# no-retry client with MAP_OPENSEARCH_REQUEST_TIMEOUT_SECONDS.
 OPENSEARCH_TIMEOUT_SECONDS = float(
-    os.getenv('OPENSEARCH_TIMEOUT_SECONDS', 5)
+    os.getenv('OPENSEARCH_TIMEOUT_SECONDS', 10)
 )
-OPENSEARCH_MAX_RETRIES = int(os.getenv('OPENSEARCH_MAX_RETRIES', 2))
+OPENSEARCH_MAX_RETRIES = int(os.getenv('OPENSEARCH_MAX_RETRIES', 3))
 OPENSEARCH_POOL_MAXSIZE = int(os.getenv('OPENSEARCH_POOL_MAXSIZE', 25))
 
 # Read alias of the facilities search index (see api/facility_search).

@@ -130,3 +130,32 @@ class ModerationEventUpdateHandlerTest(TestCase):
             moderation_event_update_handler_for_opensearch(
                 moderation_event(), created=False
             )
+
+
+class CallbackNeverRaisesTest(TestCase):
+    """An exception in an on_commit callback escapes after COMMIT."""
+
+    def test_client_construction_failure_is_contained(self):
+        with patch(CONNECTION, side_effect=ValueError('no creds')), \
+                patch('api.signals.report_error_to_rollbar') as report, \
+                self.captureOnCommitCallbacks(execute=True):
+            location_post_delete_handler_for_opensearch(facility())
+            moderation_event_update_handler_for_opensearch(
+                moderation_event(), created=False
+            )
+
+        report.assert_called()
+
+    def test_notifier_failure_is_contained(self):
+        with patch(CONNECTION) as connection, \
+                patch('api.signals.signal_error_notifier',
+                      side_effect=RuntimeError('rollbar down')), \
+                self.captureOnCommitCallbacks(execute=True):
+            connection.return_value.client.delete.return_value = {
+                'result': 'not_found'}
+            connection.return_value.client.update.return_value = {
+                'result': 'not_found'}
+            location_post_delete_handler_for_opensearch(facility())
+            moderation_event_update_handler_for_opensearch(
+                moderation_event(), created=False
+            )

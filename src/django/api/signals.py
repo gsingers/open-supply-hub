@@ -57,9 +57,31 @@ def location_post_delete_handler_for_opensearch(instance, **kwargs):
     """
     facility_id = instance.id
     is_candidate = instance.is_candidate
-    transaction.on_commit(
-        lambda: _delete_location_document(facility_id, is_candidate)
-    )
+    transaction.on_commit(contained(
+        '[Location Deletion]',
+        lambda: _delete_location_document(facility_id, is_candidate),
+        {'id': facility_id},
+    ))
+
+
+def contained(prefix, callback, extra_data):
+    """
+    Wrap an on_commit callback so nothing it raises escapes: by then the
+    transaction has committed, and an exception would surface as a 500 for
+    a write that succeeded.
+    """
+    def run():
+        try:
+            callback()
+        except Exception as error:
+            message = f'{prefix} OpenSearch side effect failed: {error!r}'
+            log.exception(message)
+            try:
+                report_error_to_rollbar(message=message,
+                                        extra_data=extra_data)
+            except Exception:
+                log.exception('%s Could not report to Rollbar.', prefix)
+    return run
 
 
 def _delete_location_document(facility_id, is_candidate):
@@ -124,9 +146,11 @@ def moderation_event_update_handler_for_opensearch(
 
     event_id = str(instance.uuid)
     doc = {'status': str(instance.status), 'os_id': instance.os_id}
-    transaction.on_commit(
-        lambda: _update_moderation_event_document(event_id, doc)
-    )
+    transaction.on_commit(contained(
+        '[Moderation Event Updating]',
+        lambda: _update_moderation_event_document(event_id, doc),
+        {'uuid': event_id},
+    ))
 
 
 def _update_moderation_event_document(event_id, doc):

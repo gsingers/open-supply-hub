@@ -84,7 +84,7 @@ def client():
     from api.services.opensearch.opensearch import (
         OpenSearchServiceConnection,
     )
-    return OpenSearchServiceConnection().client
+    return OpenSearchServiceConnection().map_client
 
 
 def request_timeout() -> float:

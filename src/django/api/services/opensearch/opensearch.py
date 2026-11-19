@@ -11,6 +11,29 @@ from django.conf import settings
 log = logging.getLogger(__name__)
 
 
+def client_options(for_map=False):
+    """
+    Transport options. The default client keeps opensearch-py's own
+    timeout and retry behaviour, which the v1 search, moderation and
+    rebuild callers were written against, and only sizes the pool. The
+    map client (search list, tiles) never retries: a slow cluster should
+    send the request to Postgres after one request_timeout, not after
+    several.
+    """
+    options = {
+        'timeout': settings.OPENSEARCH_TIMEOUT_SECONDS,
+        'max_retries': settings.OPENSEARCH_MAX_RETRIES,
+        'retry_on_timeout': False,
+        'pool_maxsize': settings.OPENSEARCH_POOL_MAXSIZE,
+    }
+    if for_map:
+        options.update(
+            timeout=settings.MAP_OPENSEARCH_REQUEST_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
+    return options
+
+
 class OpenSearchServiceConnection:
     '''
     The singleton class configures the connection between
@@ -46,23 +69,33 @@ class OpenSearchServiceConnection:
         verify_certs = bool(strtobool(
             os.getenv('OPENSEARCH_SSL_CERT_VERIFICATION', 'False')
         ))
+        self.__connection_kwargs = {
+            'hosts': [{'host': host, 'port': port}],
+            'http_auth': auth,
+            'use_ssl': use_ssl,
+            'verify_certs': verify_certs,
+            'connection_class': RequestsHttpConnection,
+        }
         self.__client = OpenSearch(
-            hosts=[{'host': host, 'port': port}],
-            http_auth=auth,
-            use_ssl=use_ssl,
-            verify_certs=verify_certs,
-            connection_class=RequestsHttpConnection,
-            # Bound how long a slow or unreachable cluster can hold a
-            # worker; callers on hot paths pass a tighter request_timeout.
-            timeout=settings.OPENSEARCH_TIMEOUT_SECONDS,
-            max_retries=settings.OPENSEARCH_MAX_RETRIES,
-            retry_on_timeout=True,
-            pool_maxsize=settings.OPENSEARCH_POOL_MAXSIZE,
+            **self.__connection_kwargs, **client_options()
         )
+        self.__map_client = None
 
     @property
     def client(self) -> OpenSearch:
         return self.__client
+
+    @property
+    def map_client(self) -> OpenSearch:
+        """The no-retry client for /map requests (see client_options)."""
+        if self.__map_client is None:
+            with self._lock:
+                if self.__map_client is None:
+                    self.__map_client = OpenSearch(
+                        **self.__connection_kwargs,
+                        **client_options(for_map=True),
+                    )
+        return self.__map_client
 
     @staticmethod
     def __get_aws_auth() -> AWSV4SignerAuth:
