@@ -12,6 +12,8 @@ from django.conf import settings
 from django.core.exceptions import EmptyResultSet
 from django.views.decorators.cache import cache_control
 
+from api.facility_search import backend as map_search_backend
+from api.facility_search.tiles import opensearch_grid_tile
 from ...exceptions import BadRequestException
 from ...permissions import IsAllowedHost
 from ...renderers import MvtRenderer
@@ -54,6 +56,12 @@ def get_tile(request, layer, cachekey, z, x, y, ext):
             tile = get_facilities_vector_tile(
                 request.query_params, layer, z, x, y)
         elif layer == 'facilitygrid':
+            # Behind the map_opensearch_tiles switch; falls back to
+            # PostGIS on unsupported params or any OpenSearch failure.
+            if map_search_backend.tiles_enabled():
+                grid = opensearch_grid_tile(request.query_params, z, x, y)
+                if grid is not None:
+                    return Response(grid)
             tile = get_facility_grid_vector_tile(
                 request.query_params, layer, z, x, y)
         else:
