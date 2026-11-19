@@ -74,3 +74,18 @@ class FacilitySearchRebuildTest(LiveIndexMixin, FacilityFactoryMixin,
         )
 
         self.assertEqual(self.documents()[facility.id]['name'], 'Newest')
+
+
+@requires_opensearch
+class FailedRebuildTest(LiveIndexMixin, FacilityFactoryMixin, TestCase):
+    def test_failed_build_stops_receiving_indexer_writes(self):
+        from unittest.mock import patch
+        from api.facility_search.rebuild import RebuildError
+        self.create_facility()
+
+        with patch('api.facility_search.rebuild._bulk_load',
+                   side_effect=RebuildError('boom')), \
+                self.assertRaises(RebuildError):
+            rebuild(self.client, replicas=0, report=lambda _: None)
+
+        self.assertEqual(alias_indices(self.client, building_alias()), [])

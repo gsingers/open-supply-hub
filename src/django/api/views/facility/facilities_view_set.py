@@ -20,8 +20,6 @@ from api.serializers.facility.facility_candidate_details_serializer import (
 )
 from api.services.candidate_retirement import tombstone_payload
 from api.services.candidate_switch import candidates_enabled
-from api.services.facility_processing_filter import FacilityProcessingFilter
-from api.services.facility_processing_query import FacilityProcessingQuery
 from contricleaner.lib.contri_cleaner import ContriCleaner
 from contricleaner.lib.exceptions.handler_not_set_error \
     import HandlerNotSetError
@@ -62,6 +60,7 @@ from django.views.decorators.vary import vary_on_headers
 
 from api.facilities_extent_cache import FacilitiesExtentCache
 from api.facility_search import backend as map_search_backend
+from api.facility_search.legacy import legacy_search_queryset
 from api.facility_search.list_view import (
     opensearch_facility_count,
     opensearch_list_page,
@@ -632,7 +631,7 @@ class FacilitiesViewSet(ListModelMixin,
             extent = opensearch_page.extent
         else:
             legacy_started = time.monotonic()
-            queryset = self.__legacy_search_queryset(request, sort_by)
+            queryset = legacy_search_queryset(request.query_params, sort_by)
             page_queryset = self.paginate_queryset(queryset)
             extent_cache = FacilitiesExtentCache()
             extent = extent_cache.get(queryset, request.query_params)
@@ -708,38 +707,6 @@ class FacilitiesViewSet(ListModelMixin,
             response['extent'] = extent
         response['params'] = params.validated_data
         return Response(response)
-
-    @staticmethod
-    def __legacy_search_queryset(request, sort_by):
-        """The Postgres search: filtered, annotated and ordered."""
-        facility_processing_filter = FacilityProcessingFilter.from_result(
-            FacilityProcessingQuery(request.query_params).parse()
-        )
-        queryset = (
-            FacilityIndex.objects.filter_by_query_params(
-                request.query_params,
-                facility_processing_filter=facility_processing_filter,
-            )
-        )
-        order_list = []
-
-        if (sort_by is None) or (sort_by == 'contributors_desc'):
-            order_list = ['-contributors_count', 'name']
-        elif (sort_by == 'name_asc'):
-            order_list = ['name']
-        elif (sort_by == 'name_desc'):
-            order_list = ['-name']
-        elif (sort_by == 'contributors_asc'):
-            order_list = ['contributors_count', 'name']
-
-        queryset, has_fp_relevance = (
-            facility_processing_filter.annotate_relevance(queryset)
-        )
-        if has_fp_relevance:
-            order_list.insert(0, '-_fp_relevance')
-        order_list.append('id')
-
-        return queryset.extra(order_by=order_list)
 
     @staticmethod
     def __prefetch_provenance(context, facilities):

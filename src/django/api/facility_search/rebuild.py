@@ -117,17 +117,7 @@ def delete_orphans(client, index: str, timeout: float) -> int:
     return len(orphans)
 
 
-def rebuild(client, version: Optional[int] = None, batch_size: int = 2000,
-            replicas: int = 1, swap: bool = True, delete_old: bool = False,
-            timeout: float = 120,
-            report: Callable[[str], None] = log.info) -> str:
-    index = concrete_index_name(version or next_version(client))
-    body = index_body(number_of_replicas=0)
-    body['settings']['refresh_interval'] = '-1'
-    client.indices.create(index=index, body=body)
-    client.indices.put_alias(index=index, name=building_alias())
-    report(f'Created {index}; loading api_facilityindex.')
-
+def _load(client, index, batch_size, replicas, timeout, report):
     rows = documents.indexable_rows().order_by().iterator(
         chunk_size=batch_size)
     loaded = _bulk_load(client, index, rows, batch_size, timeout)
@@ -139,6 +129,26 @@ def rebuild(client, version: Optional[int] = None, batch_size: int = 2000,
     client.indices.refresh(index=index)
     report(f'Deleted {delete_orphans(client, index, timeout)} orphans.')
     client.indices.refresh(index=index)
+
+
+def rebuild(client, version: Optional[int] = None, batch_size: int = 2000,
+            replicas: int = 1, swap: bool = True, delete_old: bool = False,
+            timeout: float = 120,
+            report: Callable[[str], None] = log.info) -> str:
+    index = concrete_index_name(version or next_version(client))
+    body = index_body(number_of_replicas=0)
+    body['settings']['refresh_interval'] = '-1'
+    client.indices.create(index=index, body=body)
+    client.indices.put_alias(index=index, name=building_alias())
+    report(f'Created {index}; loading api_facilityindex.')
+    try:
+        _load(client, index, batch_size, replicas, timeout, report)
+    except Exception:
+        # An abandoned build must not keep receiving (and possibly
+        # failing) the indexer's writes. The index is kept to inspect.
+        client.indices.delete_alias(index=index, name=building_alias())
+        report(f'Build of {index} failed; it no longer receives changes.')
+        raise
 
     FacilitySearchIndexer(client).run(once=True)
     if not swap:

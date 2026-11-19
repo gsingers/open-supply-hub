@@ -17,7 +17,8 @@ class Command(BaseCommand):
     )
 
     def add_arguments(self, parser):
-        parser.add_argument('--version', type=int,
+        # Not --version: Django reserves it for every command.
+        parser.add_argument('--index-version', type=int,
                             help='Version to build; default is next.')
         parser.add_argument('--batch-size', type=int, default=2000)
         parser.add_argument('--replicas', type=int, default=1)
@@ -43,7 +44,7 @@ class Command(BaseCommand):
             return
         rebuild(
             client,
-            version=options['version'],
+            version=options['index_version'],
             batch_size=options['batch_size'],
             replicas=options['replicas'],
             swap=not options['no_swap'],
