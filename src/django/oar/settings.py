@@ -459,6 +459,10 @@ OPENSEARCH_TIMEOUT_SECONDS = float(
 OPENSEARCH_MAX_RETRIES = int(os.getenv('OPENSEARCH_MAX_RETRIES', 2))
 OPENSEARCH_POOL_MAXSIZE = int(os.getenv('OPENSEARCH_POOL_MAXSIZE', 25))
 
+# Read alias of the facilities search index (see api/facility_search).
+# Concrete indices are <alias>-v<N>; a rebuild marks one <alias>-building.
+FACILITIES_SEARCH_INDEX = os.getenv('FACILITIES_SEARCH_INDEX', 'facilities')
+
 # /map on OpenSearch (behind the map_opensearch_* waffle switches). Map
 # requests use a tighter per-request timeout than the client default, so
 # a slow cluster falls back to Postgres quickly.

@@ -38,6 +38,7 @@ from .facility.facility_alias import (
   HistoricalFacilityAlias,
 )
 from .facility.facility_candidate_vote import FacilityCandidateVote
+from .facility.facility_search_outbox import FacilitySearchOutbox
 from .facility.facility_candidate_retirement_request import (
   FacilityCandidateRetirementRequest,
 )

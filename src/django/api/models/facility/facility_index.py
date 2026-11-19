@@ -332,6 +332,17 @@ class FacilityIndex(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True, db_index=True)
+    search_version = models.BigIntegerField(
+        null=True,
+        editable=False,
+        help_text=(
+            'Set from a sequence by a BEFORE INSERT OR UPDATE trigger '
+            '(migration 0285) on every write, whatever path made it. The '
+            'facilities OpenSearch index uses it as the external document '
+            'version, so a stale write (from a rebuild racing the indexer) '
+            'never overwrites a newer one.'
+        ),
+    )
 
     objects = FacilityIndexNewManager()
 
