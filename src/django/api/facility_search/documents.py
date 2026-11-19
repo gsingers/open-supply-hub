@@ -2,6 +2,7 @@
 from typing import Iterable
 
 from django.db import connection
+from unidecode import unidecode
 
 from api.facility_search.index_definition import (
     INTEGER_ARRAY_FIELDS,
@@ -39,11 +40,28 @@ def fetch_rows(facility_ids: Iterable[str]) -> dict:
     }
 
 
+def collation_tiebreak(name: str) -> str:
+    """
+    Order names that are equal at the first level of the en_US.UTF-8
+    collation (letters and digits, case- and accent-insensitive) the way
+    it does: unaccented before accented, then lower case before upper
+    case, then names with more spaces and punctuation first. An
+    approximation of glibc's later levels, good for the common ties
+    (case, hyphens, spaces); the parity harness reports what is left.
+    """
+    letters = [ch for ch in name if ch.isalnum()]
+    accents = ''.join('1' if unidecode(ch) != ch else '0' for ch in letters)
+    cases = ''.join('1' if ch.isupper() else '0' for ch in letters)
+    punctuation = 99 - min(len(name) - len(letters), 99)
+    return f'{accents}|{cases}|{punctuation:02d}'
+
+
 def build_document(row: dict) -> dict:
     location = row['location']
     document = {
         'os_id': row['id'],
         'name': row['name'],
+        'name_tiebreak': collation_tiebreak(row['name']),
         'native_language_name': row['native_language_name'] or [],
         'processing_type': row['processing_type'] or [],
         'contributors_count': row['contributors_count'],

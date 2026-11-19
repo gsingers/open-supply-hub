@@ -28,10 +28,11 @@ def parse_isic_filter_values(values):
     return parsed
 
 
-def build_isic_filter(selected):
+def isic_filter_columns(selected):
     """
-    Q matching locations classified under any selected category, in the
-    revision it was picked in or, through the UN correspondence, in the
+    {api_facilityindex column: sorted codes}: a location matches when any
+    column overlaps its codes. Covers each selected category in the
+    revision it was picked in and, through the UN correspondence, in the
     other one. selected = {'4': [(level, code)], '5': [...]}.
     """
     codes = {}
@@ -44,10 +45,19 @@ def build_isic_filter(selected):
             target = revisions.other(revision)
             codes.setdefault((target, 'class'), set()).update(translated)
 
-    isic_filter = Q()
+    columns = {}
     for (revision, level), level_codes in codes.items():
         for column in ISIC_COLUMNS[revision] if level_codes else ():
-            isic_filter |= Q(**{
-                f'{column.format(level=level)}__overlap': sorted(level_codes),
-            })
+            columns[column.format(level=level)] = sorted(level_codes)
+    return columns
+
+
+def build_isic_filter(selected):
+    """
+    Q matching locations classified under any selected category (see
+    isic_filter_columns).
+    """
+    isic_filter = Q()
+    for column, level_codes in isic_filter_columns(selected).items():
+        isic_filter |= Q(**{f'{column}__overlap': level_codes})
     return isic_filter or None

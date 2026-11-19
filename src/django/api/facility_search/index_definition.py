@@ -122,6 +122,9 @@ def _mappings():
                 'sort': {'type': 'keyword', 'normalizer': 'collation_key'},
             },
         },
+        # Breaks ties between names equal under name.sort the way the
+        # database collation does; see documents.collation_tiebreak.
+        'name_tiebreak': {'type': 'keyword'},
         'native_language_name': {
             'type': 'keyword',
             'fields': {

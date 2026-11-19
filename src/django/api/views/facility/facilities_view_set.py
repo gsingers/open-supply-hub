@@ -1,4 +1,5 @@
 import logging
+import time
 from functools import wraps
 from api.facility_actions.processing_facility_api import ProcessingFacilityAPI
 from api.helpers.claim_attachments import create_claim_attachment
@@ -60,6 +61,12 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.vary import vary_on_headers
 
 from api.facilities_extent_cache import FacilitiesExtentCache
+from api.facility_search import backend as map_search_backend
+from api.facility_search.list_view import (
+    opensearch_facility_count,
+    opensearch_list_page,
+    shadow_list_search,
+)
 from api.facilities_visibility_token import facilities_visibility_token
 from api.services.claim_campaign_service import (
     move_campaign_suppliers,
@@ -602,40 +609,34 @@ class FacilitiesViewSet(ListModelMixin,
         if not params.is_valid():
             raise ValidationError(params.errors)
 
-        facility_processing_filter = FacilityProcessingFilter.from_result(
-            FacilityProcessingQuery(request.query_params).parse()
-        )
-        queryset = (
-            FacilityIndex.objects.filter_by_query_params(
-                request.query_params,
-                facility_processing_filter=facility_processing_filter,
-            )
-        )
+        # Resolve the flagged set once and reuse it: __is_anonymised_only always
+        # needs the full set, while the serializer masks names only for API
+        # callers (empty for web clients). Passing `flagged` back into
+        # for_facilities_api avoids a second cache round-trip when serialising.
+        flagged = ContributorMaskingPolicy.flagged_contributors()
         sort_by = params.validated_data['sort_by']
-        order_list = []
 
-        if (sort_by is None) or (sort_by == 'contributors_desc'):
-            order_list = ['-contributors_count', 'name']
-        elif (sort_by == 'name_asc'):
-            order_list = ['name']
-        elif (sort_by == 'name_desc'):
-            order_list = ['-name']
-        elif (sort_by == 'contributors_asc'):
-            order_list = ['contributors_count', 'name']
+        # Behind the map_opensearch_search switch; None means Postgres
+        # serves the request (switch off, unsupported param, deep page or
+        # any OpenSearch failure).
+        opensearch_page = None
+        if map_search_backend.search_enabled():
+            opensearch_page = opensearch_list_page(
+                self, request, sort_by, flagged
+            )
 
-        queryset, has_fp_relevance = (
-            facility_processing_filter.annotate_relevance(queryset)
-        )
-        if has_fp_relevance:
-            order_list.insert(0, '-_fp_relevance')
-        order_list.append('id')
-
-        queryset = queryset.extra(order_by=order_list)
-
-        page_queryset = self.paginate_queryset(queryset)
-
-        extent_cache = FacilitiesExtentCache()
-        extent = extent_cache.get(queryset, request.query_params)
+        legacy_seconds = None
+        if opensearch_page is not None:
+            queryset = None
+            page_queryset = opensearch_page.rows
+            extent = opensearch_page.extent
+        else:
+            legacy_started = time.monotonic()
+            queryset = self.__legacy_search_queryset(request, sort_by)
+            page_queryset = self.paginate_queryset(queryset)
+            extent_cache = FacilitiesExtentCache()
+            extent = extent_cache.get(queryset, request.query_params)
+            legacy_seconds = time.monotonic() - legacy_started
         context = {'request': request}
 
         should_serialize_details = params.validated_data['detail']
@@ -660,11 +661,6 @@ class FacilitiesViewSet(ListModelMixin,
             request
         )
 
-        # Resolve the flagged set once and reuse it: __is_anonymised_only always
-        # needs the full set, while the serializer masks names only for API
-        # callers (empty for web clients). Passing `flagged` back into
-        # for_facilities_api avoids a second cache round-trip when serialising.
-        flagged = ContributorMaskingPolicy.flagged_contributors()
         context['masked_contributors'] = (
             ContributorMaskingPolicy.for_facilities_api(request, flagged)
         )
@@ -681,9 +677,17 @@ class FacilitiesViewSet(ListModelMixin,
             page.data['extent'] = extent
             page.data['params'] = params.validated_data
             page.data['is_same_contributor'] = is_same_contributor
+            if opensearch_page is not None:
+                page.data['anonymised_only'] = opensearch_page.anonymised_only
+                return page
             page.data['anonymised_only'] = self.__is_anonymised_only(
                 queryset, flagged, page.data.get('count')
             )
+            if map_search_backend.shadow_enabled():
+                shadow_list_search(
+                    self, request, sort_by, flagged, page_queryset,
+                    page.data.get('count'), extent, legacy_seconds,
+                )
             return page
 
         # Non-paginated response
@@ -704,6 +708,38 @@ class FacilitiesViewSet(ListModelMixin,
             response['extent'] = extent
         response['params'] = params.validated_data
         return Response(response)
+
+    @staticmethod
+    def __legacy_search_queryset(request, sort_by):
+        """The Postgres search: filtered, annotated and ordered."""
+        facility_processing_filter = FacilityProcessingFilter.from_result(
+            FacilityProcessingQuery(request.query_params).parse()
+        )
+        queryset = (
+            FacilityIndex.objects.filter_by_query_params(
+                request.query_params,
+                facility_processing_filter=facility_processing_filter,
+            )
+        )
+        order_list = []
+
+        if (sort_by is None) or (sort_by == 'contributors_desc'):
+            order_list = ['-contributors_count', 'name']
+        elif (sort_by == 'name_asc'):
+            order_list = ['name']
+        elif (sort_by == 'name_desc'):
+            order_list = ['-name']
+        elif (sort_by == 'contributors_asc'):
+            order_list = ['contributors_count', 'name']
+
+        queryset, has_fp_relevance = (
+            facility_processing_filter.annotate_relevance(queryset)
+        )
+        if has_fp_relevance:
+            order_list.insert(0, '-_fp_relevance')
+        order_list.append('id')
+
+        return queryset.extra(order_by=order_list)
 
     @staticmethod
     def __prefetch_provenance(context, facilities):
@@ -2517,6 +2553,10 @@ class FacilitiesViewSet(ListModelMixin,
         ### Sample Response
             { "count": 100000 }
         """
+        if map_search_backend.search_enabled():
+            count = opensearch_facility_count()
+            if count is not None:
+                return Response({"count": count})
         return Response({
             "count": Facility.objects.count()
         })
