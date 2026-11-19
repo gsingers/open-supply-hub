@@ -451,6 +451,34 @@ CACHES = {
     },
 }
 
+# OpenSearch client. The defaults bound how long a degraded cluster can
+# hold a Gunicorn worker: without them opensearch-py waits 10 s per try.
+OPENSEARCH_TIMEOUT_SECONDS = float(
+    os.getenv('OPENSEARCH_TIMEOUT_SECONDS', 5)
+)
+OPENSEARCH_MAX_RETRIES = int(os.getenv('OPENSEARCH_MAX_RETRIES', 2))
+OPENSEARCH_POOL_MAXSIZE = int(os.getenv('OPENSEARCH_POOL_MAXSIZE', 25))
+
+# /map on OpenSearch (behind the map_opensearch_* waffle switches). Map
+# requests use a tighter per-request timeout than the client default, so
+# a slow cluster falls back to Postgres quickly.
+MAP_OPENSEARCH_REQUEST_TIMEOUT_SECONDS = float(
+    os.getenv('MAP_OPENSEARCH_REQUEST_TIMEOUT_SECONDS', 2)
+)
+# After this many consecutive OpenSearch failures in one process, skip
+# OpenSearch for MAP_OPENSEARCH_BREAKER_COOLDOWN_SECONDS.
+MAP_OPENSEARCH_BREAKER_THRESHOLD = int(
+    os.getenv('MAP_OPENSEARCH_BREAKER_THRESHOLD', 5)
+)
+MAP_OPENSEARCH_BREAKER_COOLDOWN_SECONDS = float(
+    os.getenv('MAP_OPENSEARCH_BREAKER_COOLDOWN_SECONDS', 30)
+)
+# Share of cache-missed /api/facilities/ requests that also run the
+# OpenSearch query in shadow mode.
+MAP_OPENSEARCH_SHADOW_SAMPLE_RATE = float(
+    os.getenv('MAP_OPENSEARCH_SHADOW_SAMPLE_RATE', 1.0)
+)
+
 WAFFLE_CACHE_NAME = 'waffle'
 # Switches are runtime controls, so bound staleness well below the
 # django-waffle default of 30 days.

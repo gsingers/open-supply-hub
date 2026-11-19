@@ -1,5 +1,6 @@
 import os
 import logging
+import threading
 from distutils.util import strtobool
 
 import boto3
@@ -18,12 +19,16 @@ class OpenSearchServiceConnection:
     '''
 
     _instance = None
+    _lock = threading.Lock()
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(OpenSearchServiceConnection, cls) \
-                .__new__(cls)
-            cls._instance.__initialize()
+            with cls._lock:
+                if cls._instance is None:
+                    instance = super(OpenSearchServiceConnection, cls) \
+                        .__new__(cls)
+                    instance.__initialize()
+                    cls._instance = instance
         return cls._instance
 
     def __initialize(self):
@@ -46,7 +51,13 @@ class OpenSearchServiceConnection:
             http_auth=auth,
             use_ssl=use_ssl,
             verify_certs=verify_certs,
-            connection_class=RequestsHttpConnection
+            connection_class=RequestsHttpConnection,
+            # Bound how long a slow or unreachable cluster can hold a
+            # worker; callers on hot paths pass a tighter request_timeout.
+            timeout=settings.OPENSEARCH_TIMEOUT_SECONDS,
+            max_retries=settings.OPENSEARCH_MAX_RETRIES,
+            retry_on_timeout=True,
+            pool_maxsize=settings.OPENSEARCH_POOL_MAXSIZE,
         )
 
     @property

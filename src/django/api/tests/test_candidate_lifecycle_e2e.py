@@ -524,9 +524,11 @@ class CandidateLifecycleE2ETest(APITestCase):
         self._force_index_row(b)
         b_graph = self._graph_ids(b)
         self.client.force_authenticate(user=self.superuser)
-        response = self.client.post(
-            f'/api/v1/candidate-retirement-requests/{request.id}/approve/'
-        )
+        # The OpenSearch delete runs on commit of the retirement.
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f'/api/v1/candidate-retirement-requests/{request.id}/approve/'
+            )
         self.client.force_authenticate(user=None)
 
         self.assertEqual(status.HTTP_200_OK, response.status_code)

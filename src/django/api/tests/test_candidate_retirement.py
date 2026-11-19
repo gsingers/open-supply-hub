@@ -515,17 +515,18 @@ class CandidateRetirementTest(APITestCase):
         os_id = self.candidate.id
 
         with patch('api.signals.OpenSearchServiceConnection') as conn, \
-                patch('api.signals.signal_error_notifier') as notifier:
+                patch('api.signals.signal_error_notifier') as notifier, \
+                self.captureOnCommitCallbacks(execute=True):
             conn.return_value.client.delete.side_effect = NotFoundError(
                 404, 'not_found', {}
             )
             tombstone = self._retire()
 
-            conn.return_value.client.delete.assert_called_once_with(
-                index=OpenSearchIndexNames.PRODUCTION_LOCATIONS_INDEX,
-                id=os_id,
-            )
-            notifier.assert_not_called()
+        conn.return_value.client.delete.assert_called_once_with(
+            index=OpenSearchIndexNames.PRODUCTION_LOCATIONS_INDEX,
+            id=os_id,
+        )
+        notifier.assert_not_called()
 
         self.assertEqual(os_id, tombstone.os_id)
         self.assertFalse(
@@ -558,18 +559,19 @@ class CandidateRetirementTest(APITestCase):
         )
 
         with patch('api.signals.OpenSearchServiceConnection') as conn, \
-                patch('api.signals.signal_error_notifier') as notifier:
+                patch('api.signals.signal_error_notifier') as notifier, \
+                self.captureOnCommitCallbacks(execute=True):
             conn.return_value.client.delete.return_value = {
                 'result': 'deleted', 'id': self.facility.id,
             }
 
             location_post_delete_handler_for_opensearch(self.facility)
 
-            conn.return_value.client.delete.assert_called_once_with(
-                index=OpenSearchIndexNames.PRODUCTION_LOCATIONS_INDEX,
-                id=self.facility.id,
-            )
-            notifier.assert_not_called()
+        conn.return_value.client.delete.assert_called_once_with(
+            index=OpenSearchIndexNames.PRODUCTION_LOCATIONS_INDEX,
+            id=self.facility.id,
+        )
+        notifier.assert_not_called()
 
     def test_missing_opensearch_document_still_reported_for_facilities(self):
         post_delete.connect(
@@ -577,11 +579,12 @@ class CandidateRetirementTest(APITestCase):
         )
 
         with patch('api.signals.OpenSearchServiceConnection') as conn, \
-                patch('api.signals.signal_error_notifier') as notifier:
+                patch('api.signals.signal_error_notifier') as notifier, \
+                self.captureOnCommitCallbacks(execute=True):
             conn.return_value.client.delete.side_effect = NotFoundError(
                 404, 'not_found', {}
             )
 
             location_post_delete_handler_for_opensearch(self.facility)
 
-            notifier.assert_called_once()
+        notifier.assert_called_once()

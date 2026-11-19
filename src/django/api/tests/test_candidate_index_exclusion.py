@@ -282,7 +282,8 @@ class CandidateDeleteSignalTest(TestCase):
         facility_id = candidate.id
 
         with patch('api.signals.OpenSearchServiceConnection') as connection, \
-                patch('api.signals.signal_error_notifier') as notifier:
+                patch('api.signals.signal_error_notifier') as notifier, \
+                self.captureOnCommitCallbacks(execute=True):
             connection.return_value.client.delete.side_effect = (
                 NotFoundError(404, 'not_found', {})
             )
@@ -302,7 +303,8 @@ class CandidateDeleteSignalTest(TestCase):
         facility_id = candidate.id
 
         with patch('api.signals.OpenSearchServiceConnection') as connection, \
-                patch('api.signals.signal_error_notifier') as notifier:
+                patch('api.signals.signal_error_notifier') as notifier, \
+                self.captureOnCommitCallbacks(execute=True):
             connection.return_value.client.delete.return_value = {
                 'result': 'deleted'
             }
@@ -318,7 +320,8 @@ class CandidateDeleteSignalTest(TestCase):
         candidate = self._candidate('eg-facility-outage')
         facility_id = candidate.id
 
-        with patch('api.signals.OpenSearchServiceConnection') as connection:
+        with patch('api.signals.OpenSearchServiceConnection') as connection, \
+                self.captureOnCommitCallbacks(execute=True):
             connection.return_value.client.delete.side_effect = (
                 ConnectionError('N/A', 'down', None)
             )
@@ -328,21 +331,29 @@ class CandidateDeleteSignalTest(TestCase):
             Facility.including_candidates.filter(id=facility_id).exists()
         )
 
-    def test_deleting_a_confirmed_facility_still_raises_on_outage(self):
+    def test_deleting_a_confirmed_facility_reports_an_outage(self):
+        # An outage must not fail or roll back the Postgres delete; the
+        # possibly orphaned document is reported instead.
         facility = self._create()
+        facility_id = facility.id
 
-        with patch('api.signals.OpenSearchServiceConnection') as connection:
+        with patch('api.signals.OpenSearchServiceConnection') as connection, \
+                patch('api.signals.report_error_to_rollbar') as report, \
+                self.captureOnCommitCallbacks(execute=True):
             connection.return_value.client.delete.side_effect = (
                 ConnectionError('N/A', 'down', None)
             )
-            with self.assertRaises(ConnectionError):
-                facility.delete()
+            facility.delete()
+
+        report.assert_called_once()
+        self.assertFalse(Facility.objects.filter(id=facility_id).exists())
 
     def test_missing_document_is_still_reported_for_confirmed(self):
         facility = self._create()
 
         with patch('api.signals.OpenSearchServiceConnection') as connection, \
-                patch('api.signals.signal_error_notifier') as notifier:
+                patch('api.signals.signal_error_notifier') as notifier, \
+                self.captureOnCommitCallbacks(execute=True):
             connection.return_value.client.delete.side_effect = (
                 NotFoundError(404, 'not_found', {})
             )
@@ -354,7 +365,8 @@ class CandidateDeleteSignalTest(TestCase):
         facility = self._create()
         facility_id = facility.id
 
-        with patch('api.signals.OpenSearchServiceConnection') as connection:
+        with patch('api.signals.OpenSearchServiceConnection') as connection, \
+                self.captureOnCommitCallbacks(execute=True):
             connection.return_value.client.delete.return_value = {
                 'result': 'deleted'
             }
