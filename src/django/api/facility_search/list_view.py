@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass
 from typing import List, Optional
 
-from api.facility_search import backend, shadow
+from api.facility_search import backend, outbox, shadow
 from api.facility_search.query import UnsupportedQuery
 from api.facility_search.search import (
     count_documents,
@@ -89,8 +89,14 @@ def opensearch_list_page(view, request, sort_by, flagged):
 
     rows = hydrate(result.ids)
     if len(rows) < len(result.ids):
-        log.warning('[Map OpenSearch] %s indexed ids have no FacilityIndex '
-                    'row', len(result.ids) - len(rows))
+        # The index is behind Postgres for these ids, so its total and
+        # page are too: serve this request from Postgres and have the
+        # indexer settle the stale documents.
+        stale = set(result.ids) - {row.id for row in rows}
+        log.warning('[Map OpenSearch] %s stale documents; Postgres serves '
+                    'this search', len(stale))
+        outbox.enqueue(sorted(stale))
+        return None
     page = view.paginate_queryset(
         PrefetchedResults(result.total, offset, rows)
     )

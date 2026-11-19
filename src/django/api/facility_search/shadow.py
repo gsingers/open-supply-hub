@@ -5,6 +5,7 @@ in a background thread and the two results are compared and logged.
 import json
 import logging
 import random
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -17,9 +18,14 @@ from api.facility_search.search import Extent, SearchPlan, execute
 
 log = logging.getLogger(__name__)
 
-# Small and bounded: shadow work must never queue up behind real traffic.
+# Two workers, and at most MAX_PENDING comparisons running or queued per
+# process (ThreadPoolExecutor's own queue is unbounded). A sample that
+# finds no free slot is dropped, so a slow cluster can never make shadow
+# work pile up in memory behind real traffic.
+MAX_PENDING = 8
 _executor = ThreadPoolExecutor(max_workers=2,
                                thread_name_prefix='map-shadow')
+_slots = threading.BoundedSemaphore(MAX_PENDING)
 
 EXTENT_TOLERANCE = 1e-5  # geo_point doc values are lossy below ~1e-7 deg
 
@@ -68,5 +74,21 @@ def sampled() -> bool:
     return random.random() < settings.MAP_OPENSEARCH_SHADOW_SAMPLE_RATE
 
 
+def _compare_and_free_slot(plan, legacy, query_string):
+    try:
+        return compare(plan, legacy, query_string)
+    finally:
+        _slots.release()
+
+
 def submit(plan: SearchPlan, legacy: LegacyResult, query_string: str):
-    return _executor.submit(compare, plan, legacy, query_string)
+    """Queue a comparison, or drop it (None) when all slots are busy."""
+    if not _slots.acquire(blocking=False):
+        log.info('[Map OpenSearch shadow] Queue full; sample dropped.')
+        return None
+    try:
+        return _executor.submit(_compare_and_free_slot, plan, legacy,
+                                query_string)
+    except Exception:
+        _slots.release()
+        raise

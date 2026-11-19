@@ -78,3 +78,13 @@ class FacilitySearchOutboxTriggerTest(FacilityFactoryMixin, TestCase):
         second = FacilityIndex.objects.get(id=facility.id).search_version
         self.assertIsNotNone(first)
         self.assertGreater(second, first)
+
+    def test_becoming_a_candidate_reaches_the_outbox(self):
+        facility = self.create_facility()
+        FacilitySearchOutbox.objects.all().delete()
+
+        Facility.including_candidates.filter(id=facility.id).update(
+            is_candidate=True)
+
+        self.assertFalse(FacilityIndex.objects.filter(id=facility.id).exists())
+        self.assertEqual(self.pending(facility.id).count(), 1)

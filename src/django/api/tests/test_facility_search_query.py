@@ -44,8 +44,17 @@ class FreeTextTest(TestCase):
         (clause,) = filters('q=Ü*')
 
         self.assertEqual(clause['bool']['should'][0], {'wildcard': {
-            'name.folded': {'value': '*u\\**', 'case_insensitive': True},
+            'name.folded': {'value': '*ü\\**', 'case_insensitive': True},
         }})
+
+    def test_short_non_latin_q_is_not_transliterated(self):
+        # Postgres UNACCENT strips accents but keeps other scripts.
+        for text, value in (('中', '*中*'), ('Б', '*б*'), ('Éa', '*éa*')):
+            with self.subTest(text):
+                (clause,) = filters(f'q={text}')
+                self.assertEqual(
+                    clause['bool']['should'][0]['wildcard']['name.folded']
+                    ['value'], value)
 
     def test_empty_q_matches_everything(self):
         self.assertEqual(filters('q='), [])

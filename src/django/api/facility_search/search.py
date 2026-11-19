@@ -83,10 +83,12 @@ def execute(client, plan: SearchPlan, timeout: float) -> SearchResult:
 
 def hydrate(ids: List[str]) -> List[FacilityIndex]:
     """
-    The FacilityIndex rows for `ids`, in the same order. An id with no row
-    (deleted since it was indexed) is dropped.
+    The FacilityIndex rows for `ids`, in the same order, read the way the
+    legacy search reads them (candidates excluded, OSDEV-3243). An id with
+    no such row (deleted, or now a candidate, since it was indexed) is
+    dropped.
     """
-    rows = FacilityIndex.objects.in_bulk(ids)
+    rows = FacilityIndex.objects.without_candidates().in_bulk(ids)
     return [rows[os_id] for os_id in ids if os_id in rows]
 
 

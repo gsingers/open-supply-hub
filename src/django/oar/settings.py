@@ -481,7 +481,7 @@ MAP_OPENSEARCH_BREAKER_COOLDOWN_SECONDS = float(
 # Share of cache-missed /api/facilities/ requests that also run the
 # OpenSearch query in shadow mode.
 MAP_OPENSEARCH_SHADOW_SAMPLE_RATE = float(
-    os.getenv('MAP_OPENSEARCH_SHADOW_SAMPLE_RATE', 1.0)
+    os.getenv('MAP_OPENSEARCH_SHADOW_SAMPLE_RATE', 0.05)
 )
 
 WAFFLE_CACHE_NAME = 'waffle'

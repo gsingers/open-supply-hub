@@ -74,12 +74,16 @@ class FacilitiesListBackendTest(FacilityFactoryMixin, TestCase):
         self.assertEqual(body['size'], 50)
 
     @override_switch(backend.SEARCH_SWITCH, active=True)
-    def test_ids_without_a_row_are_dropped(self):
+    def test_stale_ids_send_the_request_to_postgres(self):
         self.client_mock.search.return_value = os_response(
-            ['US0000000000000', self.b.id]
+            ['US0000000000000', self.b.id], total=40
         )
 
-        self.assertEqual(self.ids(self.get()), [self.b.id])
+        response = self.get('?sort_by=name_asc')
+
+        self.assertEqual(self.ids(response),
+                         [self.a.id, self.b.id, self.c.id])
+        self.assertEqual(response.data['count'], 3)
 
     @override_switch(backend.SEARCH_SWITCH, active=True)
     def test_opensearch_error_falls_back_to_postgres(self):
@@ -141,7 +145,9 @@ class FacilitiesListBackendTest(FacilityFactoryMixin, TestCase):
     def test_shadow_serves_postgres_and_compares(self):
         self.client_mock.search.return_value = os_response(
             [self.a.id, self.b.id, self.c.id], extent=(1, 1, 3, 3))
-        with patch('api.facility_search.shadow.submit') as submit:
+        with patch('api.facility_search.shadow.submit') as submit, \
+                patch('api.facility_search.shadow.sampled',
+                      return_value=True):
             response = self.get('?sort_by=name_asc')
 
         self.assertEqual(self.ids(response), [self.a.id, self.b.id, self.c.id])
@@ -154,3 +160,63 @@ class FacilitiesListBackendTest(FacilityFactoryMixin, TestCase):
         self.assertTrue(report['ids_match'])
         self.assertTrue(report['count_match'])
         self.assertTrue(report['extent_match'])
+
+
+class HydrateCandidatesTest(FacilityFactoryMixin, TestCase):
+    """A document for a facility that is now a candidate (OSDEV-3243)."""
+
+    def setUp(self):
+        super().setUp()
+        self.addCleanup(setattr, backend, 'breaker', backend.CircuitBreaker())
+        self.a = self.create_facility(name='Alpha')
+        self.candidate = self.create_facility(name='Now a candidate')
+        # Flip it, then put its FacilityIndex row back: a stale row, as
+        # the consumer contract tests use.
+        from api.models import Facility
+        from api.models.facility.facility_index import FacilityIndex
+        row = FacilityIndex.objects.get(id=self.candidate.id)
+        Facility.including_candidates.filter(id=self.candidate.id).update(
+            is_candidate=True)
+        row.save(force_insert=True)
+        self.client_mock = MagicMock()
+        self.client_mock.search.return_value = os_response(
+            [self.candidate.id, self.a.id])
+        patcher = patch(CLIENT, return_value=self.client_mock)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    @override_switch(backend.SEARCH_SWITCH, active=True)
+    def test_candidates_are_never_served_and_the_page_stays_consistent(self):
+        from api.models import FacilitySearchOutbox
+        FacilitySearchOutbox.objects.all().delete()
+
+        response = self.client.get('/api/facilities/')
+
+        ids = [feature['id'] for feature in response.data['features']]
+        self.assertEqual(ids, [self.a.id])
+        self.assertEqual(response.data['count'], 1)
+        # The stale document is handed to the indexer to settle.
+        self.assertTrue(FacilitySearchOutbox.objects.filter(
+            facility_id=self.candidate.id).exists())
+
+
+class ShadowQueueTest(TestCase):
+    def test_samples_are_dropped_when_the_queue_is_full(self):
+        from django.conf import settings
+        from api.facility_search import shadow
+        self.assertLessEqual(settings.MAP_OPENSEARCH_SHADOW_SAMPLE_RATE, 0.1)
+        with patch.object(shadow, '_executor') as executor, \
+                patch.object(shadow, '_slots') as slots:
+            slots.acquire.return_value = False
+
+            self.assertIsNone(shadow.submit(MagicMock(), MagicMock(), 'q'))
+            executor.submit.assert_not_called()
+
+    def test_a_slot_is_released_when_the_comparison_ends(self):
+        from api.facility_search import shadow
+        free_before = shadow._slots._value
+        with patch.object(shadow, 'compare', return_value={}):
+            future = shadow.submit(MagicMock(), MagicMock(), 'q')
+            future.result(timeout=5)
+
+        self.assertEqual(shadow._slots._value, free_before)

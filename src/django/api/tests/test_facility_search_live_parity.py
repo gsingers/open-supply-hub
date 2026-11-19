@@ -16,12 +16,13 @@ from api.tests.opensearch_live import LiveIndexMixin, requires_opensearch
 NAMES = [
     'Textile Plant 3', 'Plant 7 Textiles', 'Café Nguyễn', 'a b', 'A-B',
     'Ab', 'AB', 'ab', 'Zeta Knitwear', '3M Plant', 'Ünal Tekstil',
-    '(Bracketed) Mill', 'Mill 30',
+    '(Bracketed) Mill', 'Mill 30', 'Фабрика Б', '中国工厂', 'École Ab',
 ]
 
 QUERIES = [
     '', 'q=textile', 'q=TEX', 'q=plant 3', 'q=plant 7', 'q=nguyen',
     'q=cafe', 'q=ab', 'q=a', 'q=3', 'q=unal', 'q=mill 3', 'q=-b',
+    'q=Б', 'q=б', 'q=中', 'q=中国', 'q=é', 'q=E', 'q=ÉC', 'q=фаб',
     'sort_by=name_asc', 'sort_by=name_desc', 'sort_by=contributors_asc',
     'countries=TR', 'countries=VN&countries=TR',
     'boundary={"type":"Polygon","coordinates":'

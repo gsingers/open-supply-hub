@@ -12,7 +12,6 @@ import re
 from typing import List, Optional
 
 from django.contrib.gis.geos import GEOSException, GEOSGeometry, Polygon
-from unidecode import unidecode
 
 from api.constants import FacilitiesQueryParams as P
 from api.facility_search.index_definition import NGRAM_SIZE
@@ -39,13 +38,18 @@ def _any_of(*clauses) -> dict:
 
 
 def _substring(field: str, text: str, folded: bool) -> dict:
-    """ILIKE '%text%' on a keyword with a trigram subfield."""
+    """
+    ILIKE '%text%' on a keyword with a trigram subfield. Short terms use a
+    wildcard on the normalized keyword; the field's normalizer folds the
+    pattern the same way as the indexed value (lowercase, and ASCII
+    folding of accents for `folded`), which, like UNACCENT, leaves other
+    scripts alone.
+    """
     if len(text) >= NGRAM_SIZE:
         return {'match_phrase': {f'{field}.trigram': text}}
-    value = unidecode(text) if folded else text
     subfield = 'folded' if folded else 'lowercase'
     return {'wildcard': {f'{field}.{subfield}': {
-        'value': '*' + WILDCARD_SPECIAL.sub(r'\\\1', value.lower()) + '*',
+        'value': '*' + WILDCARD_SPECIAL.sub(r'\\\1', text.lower()) + '*',
         'case_insensitive': True,
     }}}
 
