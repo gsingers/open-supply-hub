@@ -4,9 +4,14 @@ import re
 from django.http import QueryDict
 from django.test import TestCase
 
-from api.facility_search.search import plan_search
+from api.facility_search.search import (
+    HEAVY_LIST_COLUMNS,
+    hydrate,
+    plan_search,
+)
 from api.facility_search.ux import assets, relevance
 from api.facility_search.ux.text import scored_text, sort_key
+from api.tests.facility_search_helpers import FacilityFactoryMixin
 
 
 def params(query_string):
@@ -101,3 +106,17 @@ class TemplateSourceTest(TestCase):
 
     def test_sort_key_matches_the_collation_normalizer(self):
         self.assertEqual(sort_key('Dénim-Mill Ltd.'), 'denimmillltd')
+
+
+
+class HydrateTest(FacilityFactoryMixin, TestCase):
+    def test_list_rows_skip_the_large_columns_detail_rows_keep_them(self):
+        facility = self.create_facility(name='Hydrate Mill')
+
+        (row,) = hydrate([facility.id], detail=False)
+        self.assertTrue(set(HEAVY_LIST_COLUMNS)
+                        <= row.get_deferred_fields())
+        self.assertEqual(row.name, 'Hydrate Mill')
+
+        (row,) = hydrate([facility.id], detail=True)
+        self.assertEqual(row.get_deferred_fields(), set())

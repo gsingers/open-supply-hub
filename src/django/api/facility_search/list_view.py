@@ -88,7 +88,8 @@ def opensearch_list_page(view, request, sort_by, flagged):
         return None
     backend.breaker.record_success()
 
-    rows = hydrate(result.ids)
+    detail = request.query_params.get('detail', '').lower() == 'true'
+    rows = hydrate(result.ids, detail=detail)
     if len(rows) < len(result.ids):
         # The index is behind Postgres for these ids, so its total and
         # page are too: serve this request from Postgres and have the

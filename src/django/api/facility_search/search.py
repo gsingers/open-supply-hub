@@ -96,14 +96,32 @@ def execute(client, plan: SearchPlan, timeout: float) -> SearchResult:
     )
 
 
-def hydrate(ids: List[str]) -> List[FacilityIndex]:
+# JSON and array columns the list serializer does not read without
+# `detail`. For the most-contributed facilities, which the default sort
+# puts first, they are tens of KB per row, and decoding them for a page
+# of 50 cost far more than the search itself.
+HEAVY_LIST_COLUMNS = (
+    'contributors',
+    'item_sectors',
+    'facility_addresses',
+    'facility_names',
+    'extended_fields',
+    'custom_field_info',
+    'lists',
+)
+
+
+def hydrate(ids: List[str], detail: bool = True) -> List[FacilityIndex]:
     """
     The FacilityIndex rows for `ids`, in the same order, read the way the
     legacy search reads them (candidates excluded, OSDEV-3243). An id with
     no such row (deleted, or now a candidate, since it was indexed) is
     dropped.
     """
-    rows = FacilityIndex.objects.without_candidates().in_bulk(ids)
+    queryset = FacilityIndex.objects.without_candidates()
+    if not detail:
+        queryset = queryset.defer(*HEAVY_LIST_COLUMNS)
+    rows = queryset.in_bulk(ids)
     return [rows[os_id] for os_id in ids if os_id in rows]
 
 
