@@ -303,7 +303,12 @@ function FilterSidebarSearchTab({
                 <div style={{ margin: '6px 0', display: 'flex' }}>
                     {searchResetButtonGroup()}
                 </div>
-                <ShowOnly when={!embed || embedExtendedFields.length}>
+                <ShowOnly
+                    when={
+                        !searchUxActive &&
+                        (!embed || embedExtendedFields.length)
+                    }
+                >
                     <div className="form__field">
                         <ShowOnly when={!embed}>
                             <div className="form__info">

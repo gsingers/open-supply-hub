@@ -18,6 +18,7 @@ from api.facility_search import backend
 from api.facility_search.index_definition import read_alias
 from api.facility_search.mvt import EXTENT, encode_point_layer
 from api.facility_search.query import UnsupportedQuery, build_filters
+from api.facility_search.ux import relevance
 
 log = logging.getLogger(__name__)
 
@@ -43,28 +44,36 @@ def h3_resolution(z: int) -> int:
                key=lambda r: abs(2 * H3_EDGE_KM[r] - target_km))
 
 
-def grid_tile_body(params, z: int, x: int, y: int) -> dict:
-    """Raises UnsupportedQuery for params only Postgres can answer."""
+def _tile_filter(z: int, x: int, y: int) -> dict:
     bounds = mercantile.bounds(x, y, z)
-    tile_filter = {'geo_bounding_box': {'location': {
+    return {'geo_bounding_box': {'location': {
         'top_left': {'lat': bounds.north, 'lon': bounds.west},
         'bottom_right': {'lat': bounds.south, 'lon': bounds.east},
     }}}
+
+
+def grid_tile_body(params, z: int, x: int, y: int) -> dict:
+    """Raises UnsupportedQuery for params only Postgres can answer."""
     return {
         'size': 0,
         'track_total_hits': False,
-        'query': {'bool': {'filter': [*build_filters(params), tile_filter]}},
-        'aggs': {'grid': {
-            'geohex_grid': {'field': 'location',
-                            'precision': h3_resolution(z),
-                            'size': MAX_BUCKETS},
-            'aggs': {
-                'centroid': {'geo_centroid': {'field': 'location'}},
-                'bounds': {'geo_bounds': {'field': 'location',
-                                          'wrap_longitude': False}},
-            },
-        }},
+        'query': {'bool': {'filter': [*build_filters(params),
+                                      _tile_filter(z, x, y)]}},
+        'aggs': _grid_aggs(z),
     }
+
+
+def _grid_aggs(z: int) -> dict:
+    return {'grid': {
+        'geohex_grid': {'field': 'location',
+                        'precision': h3_resolution(z),
+                        'size': MAX_BUCKETS},
+        'aggs': {
+            'centroid': {'geo_centroid': {'field': 'location'}},
+            'bounds': {'geo_bounds': {'field': 'location',
+                                      'wrap_longitude': False}},
+        },
+    }}
 
 
 def tile_pixel(lng: float, lat: float, z: int, x: int,
@@ -99,9 +108,16 @@ def encode_grid_buckets(buckets: List[dict], z: int, x: int,
 
 def grid_tile(client, params, z: int, x: int, y: int,
               timeout: float) -> bytes:
-    response = client.search(index=read_alias(),
-                             body=grid_tile_body(params, z, x, y),
-                             request_timeout=timeout)
+    if relevance.wants_relevance(params, params.get('sort_by')):
+        # Search UX "Best match": the map shows what the list shows.
+        response = relevance.execute_template(
+            client, read_alias(), relevance.count_template_params(
+                params, [_tile_filter(z, x, y)], _grid_aggs(z)),
+            timeout)
+    else:
+        response = client.search(index=read_alias(),
+                                 body=grid_tile_body(params, z, x, y),
+                                 request_timeout=timeout)
     buckets = response.get('aggregations', {}).get('grid', {}).get(
         'buckets', [])
     return encode_grid_buckets(buckets, z, x, y)

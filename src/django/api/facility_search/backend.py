@@ -90,7 +90,9 @@ def search_enabled() -> bool:
 
 
 def tiles_enabled() -> bool:
-    return switch_is_active(TILES_SWITCH) and breaker.allow()
+    # The search UX needs the map to match its (scored) list.
+    return ((switch_is_active(TILES_SWITCH) or ux_switched_on())
+            and breaker.allow())
 
 
 def shadow_enabled() -> bool:

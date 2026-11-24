@@ -6,6 +6,8 @@ import {
     completeFetchFacets,
     failFetchFacets,
     completeFetchFacetValues,
+    completeFetchSingleFacet,
+    toggleFacetOpen,
     toggleFacetExpanded,
     startFetchSuggestions,
     completeFetchSuggestions,
@@ -22,6 +24,8 @@ const initialState = Object.freeze({
         unavailable: false,
         qs: '',
     }),
+    // Groups the user opened or closed (others use their defaults).
+    open: Object.freeze({}),
     expanded: Object.freeze({}),
     // Larger value lists for expanded facets, keyed by facet.
     expandedValues: Object.freeze({}),
@@ -61,6 +65,19 @@ export default createReducer(
                       expandedValues: { [key]: { $set: data.facets[key] } },
                   })
                 : state,
+        [completeFetchSingleFacet]: (state, { key, data }) =>
+            data.available &&
+            data.facets &&
+            data.facets[key] &&
+            state.facets.data
+                ? update(state, {
+                      facets: {
+                          data: { facets: { [key]: { $set: data.facets[key] } } },
+                      },
+                  })
+                : state,
+        [toggleFacetOpen]: (state, { key, open }) =>
+            update(state, { open: { [key]: { $set: open } } }),
         [toggleFacetExpanded]: (state, { key, expanded }) =>
             update(state, { expanded: { [key]: { $set: expanded } } }),
         [startFetchSuggestions]: (state, q) =>

@@ -97,7 +97,9 @@ class FacilitiesListBackendTest(FacilityFactoryMixin, TestCase):
 
     @override_switch(backend.SEARCH_SWITCH, active=True)
     def test_unsupported_params_and_deep_pages_use_postgres(self):
-        for query in ('?embed=1&contributors=1', '?partner_contributor=1',
+        # Embed mode is answered by OpenSearch since the search UX
+        # (custom text included); partner fields still are not.
+        for query in ('?partner_contributor=1',
                       '?page=201', '?page=last'):
             with self.subTest(query):
                 self.get(query)

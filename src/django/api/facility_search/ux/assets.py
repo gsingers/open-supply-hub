@@ -63,6 +63,9 @@ _TEXT_CLAUSE = '''
 ]}}
 ''' % {'fields': json.dumps(SEARCH_FIELDS)}
 
+# Without text there is nothing to rank (facet counts only), so `must` is
+# match_all and the popularity clause is left out: a bool whose only
+# clauses are `should` would have to match one of them.
 SEARCH_TEMPLATE_SOURCE = '''{
   "from": {{from}},
   "size": {{size}},
@@ -70,11 +73,12 @@ SEARCH_TEMPLATE_SOURCE = '''{
   "_source": false,
   "query": {"bool": {
     "filter": {{#toJson}}filters{{/toJson}},
-    "must": [ {{#has_text}}%(text)s{{/has_text}} ],
-    "should": [
+    "must": [ {{#has_text}}%(text)s{{/has_text}}
+              {{^has_text}}{"match_all": {}}{{/has_text}} ],
+    "should": [ {{#has_text}}
       {"rank_feature": {"field": "popularity",
         "saturation": {"pivot": 3}, "boost": 1.5}}
-    ],
+    {{/has_text}} ],
     "minimum_should_match": 0
   }},
   "sort": {{#toJson}}sort{{/toJson}},

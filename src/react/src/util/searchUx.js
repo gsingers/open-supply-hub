@@ -1,7 +1,7 @@
 // Search UX on /map (facets, typeahead, scored search, instant search).
 // Server side: src/django/api/facility_search/ux.
 import isEmpty from 'lodash/isEmpty';
-import querystring from 'querystring';
+import querystring from './qs';
 
 import {
     updateContributorFilter,
@@ -203,6 +203,16 @@ export const visibleFacets = (embed, extendedFields = []) =>
         if (facet.embedField === false) return false;
         return extendedFields.includes(facet.embedField);
     });
+
+// A group is open if the user opened it, or by default when it starts
+// open or has selections. Only open groups are counted: each facet costs
+// a terms aggregation over the whole result set.
+export const isFacetOpen = (openState, facet, filters) => {
+    if (openState && openState[facet.key] !== undefined) {
+        return openState[facet.key];
+    }
+    return facet.open || ((filters && filters[facet.filterKey]) || []).length > 0;
+};
 
 export const searchQueryString = (filters, embed, extra = {}) => {
     const base = createQueryStringFromSearchFilters(filters, embed);

@@ -41,6 +41,25 @@ def list_template_params(params, offset: int, size: int,
     }
 
 
+def count_template_params(params, extra_filters: List[dict],
+                          aggs: dict) -> dict:
+    """
+    Aggregations only (e.g. a grid tile) over the same result set the
+    scored list shows, so the map matches the list.
+    """
+    text = scored_text(params)
+    return {
+        'from': 0,
+        'size': 0,
+        'filters': flatten(filter_groups(params, text)) + extra_filters,
+        'sort': ['_score'],
+        'aggs': aggs,
+        'highlight': False,
+        'suggest': False,
+        **text_params(params, text),
+    }
+
+
 def parse_highlights(hits: List[dict]) -> Dict[str, Dict[str, str]]:
     """{os_id: {field: first fragment}} for the hits that have one."""
     highlights = {}

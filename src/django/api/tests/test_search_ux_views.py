@@ -11,9 +11,13 @@ from api.facility_search import backend
 FACETS = '/api/map-search/facets/'
 SUGGEST = '/api/map-search/suggest/'
 
-EMPTY_FACETS = {'aggregations': {'_total': {'doc_count': 0}}}
+EMPTY_FACETS = {'aggregations': {
+    '_total': {'doc_count': 0},
+    'f_countries': {'doc_count': 0, 'top': {'buckets': []}},
+}}
 
 
+@override_settings(MAP_SEARCH_UX_ENABLED=False)
 class SearchUxOffTest(TestCase):
     def test_endpoints_are_absent_while_the_feature_is_off(self):
         client = APIClient()
@@ -27,7 +31,13 @@ class SearchUxOffTest(TestCase):
         self.assertIs(response.json()['map_search_ux'], False)
 
 
-@override_settings(MAP_SEARCH_UX_ENABLED=True)
+LOCAL_CACHES = {name: {
+    'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+    'LOCATION': name,
+} for name in ('default', 'view_cache', 'api_throttling', 'waffle')}
+
+
+@override_settings(MAP_SEARCH_UX_ENABLED=True, CACHES=LOCAL_CACHES)
 class SearchUxOnTest(TestCase):
     def setUp(self):
         caches['view_cache'].clear()

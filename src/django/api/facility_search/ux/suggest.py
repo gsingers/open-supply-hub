@@ -123,7 +123,8 @@ def suggest(client, index: str, params, q: str, timeout: float,
     groups = build_filter_groups(params)
     return {
         'q': q,
-        'os_id': q.upper() if string_matches_os_id_format(q) else None,
+        'os_id': (q.upper() if string_matches_os_id_format(q.upper())
+                  else None),
         'facilities': _facility_suggestions(
             client, index, q, flatten(groups), timeout),
         'filters': _value_suggestions(

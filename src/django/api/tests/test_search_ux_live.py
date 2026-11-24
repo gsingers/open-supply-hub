@@ -99,3 +99,20 @@ class SearchUxLiveTest(LiveIndexMixin, FacilityFactoryMixin, TestCase):
                                  QueryDict(''), 'bangl', timeout=10)
         self.assertEqual(result['filters'][0]['label'], 'Bangladesh')
         self.assertEqual(result['filters'][0]['count'], 2)
+
+    def test_best_match_grid_tile_counts_what_the_list_shows(self):
+        from api.facility_search.tiles import grid_tile
+        from api.facility_search.ux.relevance import count_template_params
+        from api.facility_search.tiles import _grid_aggs, _tile_filter
+
+        params = QueryDict('q=denin&sort_by=relevance')
+        response = assets.search_template(
+            self.client, self.index_name, assets.search_template_id(),
+            count_template_params(params, [_tile_filter(0, 0, 0)],
+                                  _grid_aggs(0)),
+            assets.search_pipeline_id(), 10)
+        buckets = response['aggregations']['grid']['buckets']
+        # 'denin' is a typo: only the scored (fuzzy) match finds them.
+        self.assertEqual(sum(b['doc_count'] for b in buckets),
+                         self.search('q=denin').total)
+        self.assertTrue(grid_tile(self.client, params, 0, 0, 0, 10))

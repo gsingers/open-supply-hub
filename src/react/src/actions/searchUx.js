@@ -18,6 +18,7 @@ import {
     RELEVANCE_SORT,
     SUGGESTION_KIND_FACET,
     SUGGEST_URL,
+    isFacetOpen,
     isSelected,
     searchQueryString,
     toggleOption,
@@ -31,6 +32,10 @@ export const completeFetchFacets = createAction(
 export const failFetchFacets = createAction('FAIL_FETCH_SEARCH_UX_FACETS');
 export const completeFetchFacetValues = createAction(
     'COMPLETE_FETCH_SEARCH_UX_FACET_VALUES',
+);
+export const toggleFacetOpen = createAction('TOGGLE_SEARCH_UX_FACET_OPEN');
+export const completeFetchSingleFacet = createAction(
+    'COMPLETE_FETCH_SEARCH_UX_SINGLE_FACET',
 );
 export const toggleFacetExpanded = createAction(
     'TOGGLE_SEARCH_UX_FACET_EXPANDED',
@@ -64,10 +69,10 @@ const startRequest = kind => {
 const isAbort = error =>
     error && (error.name === 'CanceledError' || error.code === 'ERR_CANCELED');
 
-const facetKeysFor = ({ embeddedMap: { embed, config } }) =>
-    visibleFacets(embed, (config && config.extended_fields) || []).map(
-        facet => facet.key,
-    );
+const facetKeysFor = ({ embeddedMap: { embed, config }, searchUx, filters }) =>
+    visibleFacets(embed, (config && config.extended_fields) || [])
+        .filter(facet => isFacetOpen(searchUx.open, facet, filters))
+        .map(facet => facet.key);
 
 function fetchExpandedFacet(key) {
     return (dispatch, getState) => {
@@ -105,6 +110,28 @@ export function fetchFacets() {
                     dispatch(failFetchFacets());
                 }
             });
+    };
+}
+
+// Opening a collapsed group fetches its counts for the current filters.
+export function openFacet(key, open) {
+    return (dispatch, getState) => {
+        dispatch(toggleFacetOpen({ key, open }));
+        const state = getState();
+        const {data} = state.searchUx.facets;
+        if (!open || (data && data.facets && data.facets[key])) {
+            return null;
+        }
+        const qs = searchQueryString(state.filters, state.embeddedMap.embed, {
+            facet: [key],
+            facet_size: String(FACET_PAGE_SIZE),
+        });
+        return apiRequest
+            .get(`${FACETS_URL}?${qs}`, { signal: startRequest(`o_${key}`) })
+            .then(({ data: response }) =>
+                dispatch(completeFetchSingleFacet({ key, data: response })),
+            )
+            .catch(noop);
     };
 }
 

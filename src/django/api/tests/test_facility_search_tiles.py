@@ -224,7 +224,9 @@ class TileViewTest(FacilityFactoryMixin, TestCase):
         self.assertEqual(self.tile().status_code, 200)
 
         self.client_mock.search.reset_mock()
-        self.assertEqual(self.tile('?embed=1').status_code, 200)
+        # PostGIS answers (an unknown partner field: an empty tile).
+        self.assertIn(self.tile('?partner_contributor=1').status_code,
+                      (200, 204))
         self.client_mock.search.assert_not_called()
 
 

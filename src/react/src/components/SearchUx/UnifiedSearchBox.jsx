@@ -202,16 +202,18 @@ function UnifiedSearchBox({
                     margin="dense"
                     fullWidth
                     autoComplete="off"
-                    inputProps={{
-                        role: 'combobox',
-                        'aria-expanded': showPopper,
-                        'aria-controls': LISTBOX_ID,
-                        'aria-autocomplete': 'list',
-                        'aria-activedescendant':
-                            active >= 0 ? `search-ux-option-${active}` : '',
-                    }}
                     InputProps={{
                         className: classes.input,
+                        inputProps: {
+                            role: 'combobox',
+                            'aria-expanded': showPopper,
+                            'aria-controls': LISTBOX_ID,
+                            'aria-autocomplete': 'list',
+                            'aria-activedescendant':
+                                active >= 0
+                                    ? `search-ux-option-${active}`
+                                    : '',
+                        },
                         endAdornment: (
                             <InputAdornment position="end">
                                 {fetching && <CircularProgress size={16} />}
@@ -240,6 +242,9 @@ function UnifiedSearchBox({
                     open={showPopper}
                     anchorEl={anchor.current}
                     placement="bottom-start"
+                    // Inline, so ClickAwayListener (a DOM containment
+                    // check) sees clicks on suggestions as inside.
+                    disablePortal
                     className={classes.popper}
                     style={{
                         width: anchor.current
@@ -284,6 +289,10 @@ function UnifiedSearchBox({
                                             event.preventDefault()
                                         }
                                         onClick={() => choose(option)}
+                                        onKeyDown={event =>
+                                            event.key === 'Enter' &&
+                                            choose(option)
+                                        }
                                         onMouseEnter={() => setActive(index)}
                                     >
                                         {option.type === 'text' ? (

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import CircularProgress from '@material-ui/core/CircularProgress';
 import { arrayOf, bool, func, number, oneOfType, shape, string } from 'prop-types';
 import Checkbox from '@material-ui/core/Checkbox';
 import TextField from '@material-ui/core/TextField';
@@ -43,19 +44,20 @@ function FacetGroup({
     selected,
     labelMaps,
     open,
+    onOpen,
     expanded,
     onToggleValue,
     onExpand,
     classes,
 }) {
-    const [isOpen, setIsOpen] = useState(open || !!(selected || []).length);
+    const isOpen = open;
     const [within, setWithin] = useState('');
 
     const labelOf = (value, fallback) => {
         const label = facetValueLabel(facet.key, value, labelMaps);
         return label === String(value) && fallback ? fallback : label;
     };
-    const source = expanded && expandedData ? expandedData : data;
+    const source = (expanded && expandedData) || data || { values: [] };
     const needle = within.trim().toLowerCase();
     const rows = facetRows(source, selected, labelOf).filter(
         row => !needle || row.label.toLowerCase().includes(needle),
@@ -70,7 +72,7 @@ function FacetGroup({
                 type="button"
                 className={classes.header}
                 aria-expanded={isOpen}
-                onClick={() => setIsOpen(!isOpen)}
+                onClick={() => onOpen(!isOpen)}
             >
                 <span>
                     {facet.label}
@@ -82,7 +84,8 @@ function FacetGroup({
                 </span>
                 {isOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
             </button>
-            {isOpen && (
+            {isOpen && !data && <CircularProgress size={16} />}
+            {isOpen && data && (
                 <div role="group" aria-label={facet.label}>
                     {expanded && (
                         <TextField
@@ -144,6 +147,7 @@ function FacetGroup({
 }
 
 FacetGroup.defaultProps = {
+    data: null,
     expandedData: null,
     selected: [],
     open: false,
@@ -156,12 +160,13 @@ FacetGroup.propTypes = {
     data: shape({
         values: arrayOf(shape({ value: valueType, count: number })),
         other: number,
-    }).isRequired,
+    }),
     expandedData: shape({}),
     selected: arrayOf(shape({ value: valueType, label: valueType })),
     labelMaps: shape({}).isRequired,
     open: bool,
     expanded: bool,
+    onOpen: func.isRequired,
     onToggleValue: func.isRequired,
     onExpand: func.isRequired,
     classes: shape({}).isRequired,

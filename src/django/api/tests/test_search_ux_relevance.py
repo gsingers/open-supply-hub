@@ -1,4 +1,5 @@
 import json
+import re
 
 from django.http import QueryDict
 from django.test import TestCase
@@ -75,6 +76,9 @@ class TemplateSourceTest(TestCase):
             text = text.replace('{{#toJson}}%s{{/toJson}}' % name,
                                 json.dumps(value))
             text = text.replace('{{%s}}' % name, str(value))
+        # Render with the text present: drop inverted sections entirely.
+        text = re.sub(r'\{\{\^(\w+)\}\}.*?\{\{/\1\}\}', '', text,
+                      flags=re.S)
         for section in ('has_text', 'highlight', 'suggest'):
             text = text.replace('{{#%s}}' % section, '')
             text = text.replace('{{/%s}}' % section, '')
