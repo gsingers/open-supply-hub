@@ -24,9 +24,9 @@ class CompareQueryTest(FacilityFactoryMixin, TestCase):
     def test_routed_queries_are_reported_not_run(self):
         client = MagicMock()
 
-        comparison = compare_query(client, 'embed=1&q=a')
+        comparison = compare_query(client, 'partner_contributor=1&q=a')
 
-        self.assertEqual(comparison.routed, 'embed')
+        self.assertEqual(comparison.routed, 'partner_contributor')
         client.search.assert_not_called()
 
     def test_disagreement_is_counted_per_param(self):
