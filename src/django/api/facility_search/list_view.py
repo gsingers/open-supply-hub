@@ -52,6 +52,7 @@ class OpenSearchPage:
     rows: List
     extent: Optional[Extent]
     anonymised_only: bool
+    highlights: dict
 
 
 def _page_window(view, request):
@@ -103,13 +104,17 @@ def opensearch_list_page(view, request, sort_by, flagged):
     anonymised_only = (bool(flagged.contributor_ids)
                        and not result.has_downloadable
                        and result.total > 0)
-    return OpenSearchPage(page, result.extent, anonymised_only)
+    return OpenSearchPage(page, result.extent, anonymised_only,
+                          result.highlights)
 
 
 def shadow_list_search(view, request, sort_by, flagged, page_rows, total,
                        extent, postgres_seconds):
     """Queue an OpenSearch run of the search Postgres just served."""
     window = _page_window(view, request)
+    # Postgres has no relevance order to compare a scored search with.
+    if sort_by == 'relevance':
+        return None
     if window is None or not shadow.sampled():
         return None
     offset, size = window

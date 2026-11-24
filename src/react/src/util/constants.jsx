@@ -1436,7 +1436,9 @@ export const optionsForSortingResults = [
                 <ArrowUpwardIcon style={{ fontSize: 20 }} />
             </div>
         ),
-    },
+    },    // Search UX only, offered when there is search text (scored by
+    // OpenSearch; see ResultsSortDropdown).
+    { value: 'relevance', label: 'Best match' },
 ];
 
 // This offset maps the platform's 0-based row_index to the row number in

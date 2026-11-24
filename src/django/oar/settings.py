@@ -291,6 +291,8 @@ REST_FRAMEWORK = {
         'data_upload': '30/minute',
         'claim_invite': '20/day',
         'tiles': '300/minute',
+        # Typeahead and facet counts fire per keystroke / filter change.
+        'search_ux': '300/minute',
     },
     # By default, the value of NON_FIELD_ERRORS_KEY is 'non_field_errors'.
     # It is being redefined to ensure 100% consistency between custom error
@@ -483,6 +485,19 @@ MAP_OPENSEARCH_BREAKER_COOLDOWN_SECONDS = float(
 MAP_OPENSEARCH_SHADOW_SAMPLE_RATE = float(
     os.getenv('MAP_OPENSEARCH_SHADOW_SAMPLE_RATE', 0.05)
 )
+
+# Search UX on /map (api/facility_search/ux). On with the map_search_ux
+# waffle switch, or forced on here for stacks that cannot write switches.
+MAP_SEARCH_UX_ENABLED = os.getenv(
+    'MAP_SEARCH_UX_ENABLED', 'false').lower() == 'true'
+# Version of the stored search templates and pipelines to use; a
+# relevance change installs a new version beside the old one.
+MAP_SEARCH_UX_ASSET_VERSION = int(
+    os.getenv('MAP_SEARCH_UX_ASSET_VERSION', 1))
+# Seconds the facet and suggestion responses are cached (memcached and
+# CloudFront via Cache-Control).
+MAP_SEARCH_UX_CACHE_SECONDS = int(
+    os.getenv('MAP_SEARCH_UX_CACHE_SECONDS', 60))
 
 WAFFLE_CACHE_NAME = 'waffle'
 # Switches are runtime controls, so bound staleness well below the

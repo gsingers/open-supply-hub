@@ -20,6 +20,8 @@ ROW_FIELDS = (
     'location',
     'is_closed',
     'search_version',
+    'address',
+    'approved_claim_ids',
     *KEYWORD_ARRAY_FIELDS,
     *INTEGER_ARRAY_FIELDS,
 )
@@ -33,7 +35,9 @@ def indexable_rows():
     """The rows the legacy search reads: FacilityIndex minus candidates."""
     return FacilityIndex.objects.without_candidates().annotate(
         name_search=RawSQL('UPPER(UNACCENT(api_facilityindex.name))', []),
-    ).values(*ROW_FIELDS, 'name_search')
+        custom_text_folded=RawSQL(
+            'UNACCENT(api_facilityindex.custom_text_search)', []),
+    ).values(*ROW_FIELDS, 'name_search', 'custom_text_folded')
 
 
 def fetch_rows(facility_ids: Iterable[str]) -> dict:
@@ -71,7 +75,14 @@ def build_document(row: dict) -> dict:
         'contributors_count': row['contributors_count'],
         'location': {'lat': location.y, 'lon': location.x},
         'is_closed': row['is_closed'],
+        'name_text': row['name'],
+        'address_text': row.get('address') or '',
+        'claim_status': ('claimed' if row.get('approved_claim_ids')
+                         else 'unclaimed'),
+        'custom_text_search': row.get('custom_text_folded') or '',
     }
+    if row['contributors_count']:
+        document['popularity'] = row['contributors_count']
     for field in KEYWORD_ARRAY_FIELDS + INTEGER_ARRAY_FIELDS:
         value = row[field]
         if field == 'country_code':

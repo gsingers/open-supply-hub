@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { arrayOf, bool, func, string } from 'prop-types';
+import { arrayOf, bool, func, shape, string } from 'prop-types';
 import { connect } from 'react-redux';
 import { withRouter } from 'react-router';
 import { Link } from 'react-router-dom';
@@ -54,6 +54,9 @@ import BadgeClaimed from './BadgeClaimed';
 import CopyLinkIcon from './CopyLinkIcon';
 import { useResultListHeight } from '../util/useHeightSubtract';
 import DownloadButtonWithFlags from './DownloadButtonWithFlags';
+import Highlighted from './SearchUx/Highlighted';
+import SearchFeedback from './SearchUx/SearchFeedback';
+import { isSearchUxActive } from '../util/searchUx';
 import LoginRequiredDialog from './LoginRequiredDialog';
 
 const makeFacilitiesTabStyles = theme => ({
@@ -175,7 +178,35 @@ const makeFacilitiesTabStyles = theme => ({
     },
 });
 
+// Search UX: when a result matched on something other than its name or
+// address, say what, so a broader match does not look wrong.
+const MATCHED_FIELD_LABELS = Object.freeze({
+    native_language_name: 'Native name',
+    parent_company_name: 'Parent company',
+    product_type: 'Product type',
+});
+
+function MatchedElsewhere({ fields }) {
+    if (!fields) return null;
+    const other = Object.keys(MATCHED_FIELD_LABELS).filter(f => fields[f]);
+    if (!other.length) return null;
+    return (
+        <div style={{ fontSize: '13px', color: '#555', marginTop: '4px' }}>
+            {other.map(field => (
+                <div key={field}>
+                    {MATCHED_FIELD_LABELS[field]}:{' '}
+                    <Highlighted text={fields[field]} />
+                </div>
+            ))}
+        </div>
+    );
+}
+
+MatchedElsewhere.defaultProps = { fields: null };
+MatchedElsewhere.propTypes = { fields: shape({}) };
+
 function FilterSidebarFacilitiesTab({
+    searchUxActive,
     user,
     fetching,
     data,
@@ -312,12 +343,15 @@ function FilterSidebarFacilitiesTab({
                     >
                         No facilities matching this search
                     </Typography>
+                    {searchUxActive && <SearchFeedback />}
                 </div>
             </div>
         );
     }
 
     const facilitiesCount = get(data, 'count', null);
+    // Search UX: matched text per OS ID (scored searches only).
+    const highlights = get(data, 'highlights', {}) || {};
 
     const progress = facilitiesCount
         ? (get(downloadData, 'results.rows', []).length * 100) / facilitiesCount
@@ -396,6 +430,7 @@ function FilterSidebarFacilitiesTab({
     return (
         <>
             {listHeaderInsetComponent}
+            {searchUxActive && <SearchFeedback />}
             <div style={filterSidebarStyles.controlPanelContentStyles}>
                 <List component="div">
                     <InfiniteAnyHeight
@@ -483,7 +518,13 @@ function FilterSidebarFacilitiesTab({
                                                             '-0.004em',
                                                     }}
                                                 >
-                                                    {name}
+                                                    <Highlighted
+                                                        text={get(
+                                                            highlights,
+                                                            [osID, 'name'],
+                                                        )}
+                                                        fallback={name}
+                                                    />
                                                 </span>
                                                 <Grid
                                                     container
@@ -542,7 +583,16 @@ function FilterSidebarFacilitiesTab({
                                                         </Grid>
                                                     </ShowOnly>
                                                 </Grid>
-                                                {address}
+                                                <Highlighted
+                                                    text={get(highlights, [
+                                                        osID,
+                                                        'address',
+                                                    ])}
+                                                    fallback={address}
+                                                />
+                                                <MatchedElsewhere
+                                                    fields={highlights[osID]}
+                                                />
                                             </Link>
                                             {isClosed ? (
                                                 <FeatureFlag
@@ -583,6 +633,7 @@ FilterSidebarFacilitiesTab.defaultProps = {
 };
 
 FilterSidebarFacilitiesTab.propTypes = {
+    searchUxActive: bool.isRequired,
     user: userPropType,
     data: facilityCollectionPropType,
     fetching: bool.isRequired,
@@ -623,8 +674,10 @@ function mapStateToProps({
         facilities: { data: downloadData },
     },
     embeddedMap: { embed },
+    featureFlags: { flags },
 }) {
     return {
+        searchUxActive: isSearchUxActive(flags),
         user,
         data,
         downloadData,

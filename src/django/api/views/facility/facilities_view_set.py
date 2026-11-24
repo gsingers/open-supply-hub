@@ -678,6 +678,9 @@ class FacilitiesViewSet(ListModelMixin,
             page.data['is_same_contributor'] = is_same_contributor
             if opensearch_page is not None:
                 page.data['anonymised_only'] = opensearch_page.anonymised_only
+                if opensearch_page.highlights:
+                    # Search UX: matched text per result, keyed by OS ID.
+                    page.data['highlights'] = opensearch_page.highlights
                 return page
             page.data['anonymised_only'] = self.__is_anonymised_only(
                 queryset, flagged, page.data.get('count')

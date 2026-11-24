@@ -38,6 +38,16 @@ class SustainedRateThrottle(UserCustomRateThrottle):
     model_rate_field = 'sustained_rate'
 
 
+class SearchUxThrottle(UserRateThrottle):
+    """
+    Typeahead and facet counts: one request per keystroke or filter
+    change, so they get their own budget instead of the 100/minute burst
+    one. Response size is capped separately (ux/views.py).
+    """
+    scope = 'search_ux'
+    cache = caches['api_throttling']
+
+
 class DataUploadThrottle(UserCustomRateThrottle):
     scope = 'data_upload'
     model_rate_field = 'data_upload_rate'

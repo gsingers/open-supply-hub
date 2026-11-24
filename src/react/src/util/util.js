@@ -476,6 +476,7 @@ export const createQueryStringFromSearchFilters = (
         boundary = {},
         sortAlgorithm = {},
         claimStatuses = [],
+        claimStatus = [],
         partnerContributors = [],
     },
     withEmbed,
@@ -519,6 +520,7 @@ export const createQueryStringFromSearchFilters = (
         embed: !withEmbed ? '' : '1',
         detail: detail ? 'true' : undefined,
         partner_contributor: partnerContributors.map(c => c.value),
+        claim_status: createCompactSortedQuerystringInputObject(claimStatus),
     });
 
     return querystring.stringify(omitBy(inputForQueryString, isEmpty));
@@ -602,6 +604,7 @@ export const createFiltersFromQueryString = qs => {
         boundary = '',
         sort_by: sortBy = '',
         partner_contributor: rawPartnerContributors = [],
+        claim_status: claimStatus = [],
     } = querystring.parse(qsToParse);
 
     const normaliseStringArray = val => {
@@ -655,6 +658,7 @@ export const createFiltersFromQueryString = qs => {
         partnerContributors: normaliseStringArray(
             rawPartnerContributors,
         ).map(v => ({ value: v, label: v, groupLabel: '' })),
+        claimStatus: createSelectOptionsFromParams(claimStatus),
     });
 };
 

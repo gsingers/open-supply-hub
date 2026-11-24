@@ -18,8 +18,6 @@ def filters(query_string):
 class UnsupportedParamsTest(TestCase):
     def test_params_without_parity_are_routed_to_postgres(self):
         for query_string in (
-            'embed=1',
-            'embed=0&q=shirt',
             'partner_contributor=12',
             'facility_type=zzzz unknown words',
             'native_language_name=a,b',
@@ -29,6 +27,31 @@ class UnsupportedParamsTest(TestCase):
             with self.subTest(query_string):
                 with self.assertRaises(UnsupportedQuery):
                     filters(query_string)
+
+
+class EmbedTest(TestCase):
+    def test_embed_alone_adds_no_clause(self):
+        self.assertEqual(filters('embed=1&contributors=7'),
+                         [{'terms': {'contributors_id': ['7']}}])
+
+    def test_embed_q_also_matches_the_contributors_custom_text(self):
+        # Legacy: custom_text_search__unaccent__contains='7|shirt'.
+        clause = filters('embed=1&contributors=7&q=Shirt')[0]
+
+        self.assertIn(
+            {'wildcard': {'custom_text_search': {'value': '*7|shirt*'}}},
+            clause['bool']['should'],
+        )
+
+
+class ClaimStatusTest(TestCase):
+    def test_known_values_filter_and_unknown_ones_are_ignored(self):
+        self.assertEqual(filters('claim_status=claimed&claim_status=x'),
+                         [{'terms': {'claim_status': ['claimed']}}])
+
+    def test_relevance_sort_without_text_orders_like_the_default(self):
+        self.assertEqual(build_sort('relevance'),
+                         build_sort('contributors_desc'))
 
 
 class FreeTextTest(TestCase):

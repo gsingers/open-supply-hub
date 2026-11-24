@@ -248,6 +248,17 @@ class FacilityIndexNewManager(models.Manager):
                 sector__overlap=sectors
             )
 
+        # Search UX facet; the OpenSearch path filters the same values.
+        claim_statuses = {
+            value for value in params.getlist(
+                FacilitiesQueryParams.CLAIM_STATUS)
+            if value in ('claimed', 'unclaimed')
+        }
+        if claim_statuses == {'claimed'}:
+            facilities_qs = facilities_qs.exclude(approved_claim_ids=[])
+        elif claim_statuses == {'unclaimed'}:
+            facilities_qs = facilities_qs.filter(approved_claim_ids=[])
+
         partner_contributors = params.getlist(
             FacilitiesQueryParams.PARTNER_CONTRIBUTOR
         )

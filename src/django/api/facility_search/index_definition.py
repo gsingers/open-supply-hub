@@ -53,6 +53,39 @@ KEYWORD_ARRAY_FIELDS = (
     'isic_mapped_class',
 )
 
+# Keyword fields the search UX facets on: loaded eagerly so the first
+# aggregation after a refresh does not pay for building global ordinals.
+FACET_KEYWORD_FIELDS = (
+    'country_code',
+    'contrib_types',
+    'sector',
+    'product_type',
+    'number_of_workers',
+    'facility_type',
+    'parent_company_name',
+    'processing_type',
+    'claim_status',
+)
+
+# Keyword fields that also get a scored text subfield (`<field>.text`).
+TEXT_SUBFIELD_FIELDS = ('parent_company_name', 'product_type')
+
+NAME_SYNONYMS = [
+    'ltd, limited',
+    'pvt, private',
+    'co, company',
+    'corp, corporation',
+    'inc, incorporated',
+    'intl, international',
+    'mfg, manufacturing',
+    'ind, industries, industry',
+    'exp, export, exports',
+    'fty, factory',
+    'garment, garments',
+    'textile, textiles',
+    'mill, mills',
+]
+
 INTEGER_ARRAY_FIELDS = (
     'contributors_id',
     'lists',
@@ -91,6 +124,40 @@ ANALYSIS = {
             'type': 'custom',
             'tokenizer': 'trigram',
             'filter': ['lowercase'],
+        },
+        # Scored text matching for the search UX (ux/): words, lower case,
+        # accents folded. ICU folding would be better for non-Latin
+        # scripts; AWS OpenSearch ships analysis-icu, the stock docker
+        # image does not, so the prototype uses asciifolding.
+        'folded_text': {
+            'type': 'custom',
+            'tokenizer': 'standard',
+            'filter': ['lowercase', 'asciifolding'],
+        },
+        'folded_text_search': {
+            'type': 'custom',
+            'tokenizer': 'standard',
+            'filter': ['lowercase', 'asciifolding', 'name_synonyms'],
+        },
+        # Typeahead: every word indexed as its prefixes, queried whole.
+        'prefix_index': {
+            'type': 'custom',
+            'tokenizer': 'standard',
+            'filter': ['lowercase', 'asciifolding', 'prefix_edge'],
+        },
+    },
+    'filter': {
+        # Search-time only, so the list can change with a reindex-free
+        # close/open of the index. Abbreviations that facility names use
+        # interchangeably; see ux/relevance.py for how they are weighted.
+        'name_synonyms': {
+            'type': 'synonym_graph',
+            'synonyms': NAME_SYNONYMS,
+        },
+        'prefix_edge': {
+            'type': 'edge_ngram',
+            'min_gram': 1,
+            'max_gram': 20,
         },
     },
     'normalizer': {
@@ -149,11 +216,48 @@ def _mappings():
         'contributors_count': {'type': 'integer'},
         'location': {'type': 'geo_point'},
         'is_closed': {'type': 'boolean'},
+        # --- Search UX (ux/): scored text, typeahead, facets, ranking ---
+        'name_text': {
+            'type': 'text',
+            'analyzer': 'folded_text',
+            'search_analyzer': 'folded_text_search',
+            'fields': {
+                'prefix': {
+                    'type': 'text',
+                    'analyzer': 'prefix_index',
+                    'search_analyzer': 'folded_text',
+                },
+            },
+        },
+        'address_text': {
+            'type': 'text',
+            'analyzer': 'folded_text',
+            'search_analyzer': 'folded_text_search',
+        },
+        # 'claimed' or 'unclaimed'.
+        'claim_status': {'type': 'keyword'},
+        # contributors_count as a ranking signal; absent when 0, since a
+        # rank_feature must be positive.
+        'popularity': {'type': 'rank_feature'},
+        # UNACCENT(custom_text_search): the embed-mode free text, entries
+        # '<contributor id>|<lower-cased value>' joined by spaces.
+        'custom_text_search': {'type': 'keyword', 'ignore_above': 8000},
+    }
+    properties['native_language_name']['fields']['text'] = {
+        'type': 'text', 'analyzer': 'folded_text',
     }
     for field in KEYWORD_ARRAY_FIELDS:
         properties[field] = {'type': 'keyword'}
     for field in INTEGER_ARRAY_FIELDS:
         properties[field] = {'type': 'integer'}
+    for field in FACET_KEYWORD_FIELDS:
+        properties[field]['eager_global_ordinals'] = True
+    for field in TEXT_SUBFIELD_FIELDS:
+        properties[field].setdefault('fields', {})['text'] = {
+            'type': 'text',
+            'analyzer': 'folded_text',
+            'search_analyzer': 'folded_text_search',
+        }
     return {'dynamic': 'strict', 'properties': properties}
 
 

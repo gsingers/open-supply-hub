@@ -33,6 +33,10 @@ from api.views.stripe.download_locations_checkout_session_view \
 from api.views.stripe.download_locations_checkout_webhook_view \
      import DownloadLocationsCheckoutWebhookView
 from api.admin import admin_site
+from api.facility_search.ux.views import (
+    map_search_facets,
+    map_search_suggest,
+)
 from api.facilities_download_view_set import FacilitiesDownloadViewSet
 from web.views import environment, health_check
 
@@ -289,6 +293,10 @@ internal_apis = [
     path('tile/<layer>/<cachekey>/<int:z>/<int:x>/<int:y>.<ext>',
          views.get_tile, name='tile'),
     path('api/current_tile_cache_key/', views.current_tile_cache_key),
+    path('api/map-search/facets/', map_search_facets,
+         name='map_search_facets'),
+    path('api/map-search/suggest/', map_search_suggest,
+         name='map_search_suggest'),
     path(
         'api-blocks/',
         views.ApiBlockViewSet.as_view({'get': 'list'}),

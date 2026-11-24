@@ -9,14 +9,14 @@ Postgres instead.
 """
 import json
 import re
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from django.contrib.gis.geos import GEOSException, GEOSGeometry, Polygon
 from django.db import connection
 
 from api.constants import FacilitiesQueryParams as P
 from api.facility_search.index_definition import NGRAM_SIZE
-from api.helpers.helpers import clean
+from api.helpers.helpers import clean, format_custom_text
 from api.isic import isic_filter_columns, parse_isic_filter_values
 from api.os_id import string_matches_os_id_format
 from api.services.facility_processing_filter import FacilityProcessingFilter
@@ -42,6 +42,13 @@ def fold_like_postgres(text: str) -> str:
     """UPPER(UNACCENT(text)), computed by Postgres itself."""
     with connection.cursor() as cursor:
         cursor.execute('SELECT UPPER(UNACCENT(%s))', [text])
+        return cursor.fetchone()[0]
+
+
+def fold_unaccent(text: str) -> str:
+    """UNACCENT(text), computed by Postgres itself."""
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT UNACCENT(%s)', [text])
         return cursor.fetchone()[0]
 
 
@@ -80,21 +87,49 @@ def _resolve_os_id(os_id: str) -> Optional[str]:
         return os_id
 
 
-def _id_and_text(params) -> List[dict]:
-    clauses = []
+def _os_id_clauses(params):
+    """The exact-id part of the text group, and the text left over."""
     os_id = params.get(P.ID)
     text = params.get(P.Q)
     if os_id is None and string_matches_os_id_format(text):
         os_id, text = text, None
-    if os_id is not None:
-        resolved = _resolve_os_id(os_id)
-        clauses.append({'term': {'os_id': resolved}} if resolved
-                       else MATCH_NONE)
+    if os_id is None:
+        return [], text
+    resolved = _resolve_os_id(os_id)
+    return [{'term': {'os_id': resolved}} if resolved else MATCH_NONE], text
+
+
+def _embed_custom_text(params, text: str) -> Optional[dict]:
+    """
+    Embed mode also matches the embed contributor's custom text, as the
+    legacy custom_text_search__unaccent__contains does.
+    """
+    if P.EMBED not in params:
+        return None
+    contributors = params.getlist(P.CONTRIBUTORS)
+    custom = (format_custom_text(contributors[0], text) if contributors
+              else text)
+    return _wildcard_contains('custom_text_search', fold_unaccent(custom))
+
+
+def text_match_clause(params, text: str) -> dict:
+    """The legacy unscored match for `q`: name substring, id, custom text."""
+    clauses = [_name_substring(text), {'term': {'os_id': text}}]
+    custom = _embed_custom_text(params, text)
+    if custom is not None:
+        clauses.append(custom)
+    return _any_of(*clauses)
+
+
+def _id_and_text(params) -> List[dict]:
+    clauses, text = _os_id_clauses(params)
     # `name` is the deprecated spelling of `q`; both may be given.
-    for value in (text, params.get(P.NAME)):
-        if value:
-            clauses.append(_any_of(_name_substring(value),
-                                   {'term': {'os_id': value}}))
+    if text:
+        clauses.append(text_match_clause(params, text))
+    name = params.get(P.NAME)
+    if name:
+        clauses.append(_any_of(_name_substring(name),
+                               {'term': {'os_id': name}}))
     return clauses
 
 
@@ -194,31 +229,60 @@ def _native_language_name(params) -> List[dict]:
     return [_native_name_substring(text)]
 
 
+def _claim_status(params) -> List[dict]:
+    values = [v for v in params.getlist(P.CLAIM_STATUS)
+              if v in ('claimed', 'unclaimed')]
+    return _terms('claim_status', values)
+
+
 def _check_supported(params) -> None:
-    if P.EMBED in params:
-        raise UnsupportedQuery('embed')
     if params.getlist(P.PARTNER_CONTRIBUTOR):
         raise UnsupportedQuery('partner_contributor')
 
 
-def build_filters(params) -> List[dict]:
+# Filter groups, keyed by the facet that owns them. A disjunctive facet
+# count drops its own group and keeps every other one (ux/facets.py).
+TEXT_GROUP = 'text'
+
+
+def build_filter_groups(params, include_text=True) -> Dict[str, List[dict]]:
+    """
+    The filter clauses for `params`, grouped by the parameter that
+    produced them. With include_text=False the `q`/`name` group is left
+    out, for callers that score the text instead (ux/relevance.py).
+    """
     _check_supported(params)
-    clauses = _id_and_text(params)
-    clauses += _terms('country_code', params.getlist(P.COUNTRIES))
-    clauses += _terms('contrib_types', params.getlist(P.CONTRIBUTOR_TYPES))
-    clauses += _contributors(params)
-    clauses += _terms('lists', params.getlist(P.LISTS))
-    clauses += _boundary(params)
-    clauses += _parent_company(params)
-    clauses += _facility_processing(params)
-    clauses += _isic(params)
-    clauses += _terms('product_type',
-                      [clean(v) for v in params.getlist(P.PRODUCT_TYPE)])
-    clauses += _terms('number_of_workers',
-                      params.getlist(P.NUMBER_OF_WORKERS))
-    clauses += _native_language_name(params)
-    clauses += _terms('sector', params.getlist(P.SECTOR))
-    return clauses
+    groups = {
+        TEXT_GROUP: _id_and_text(params) if include_text
+        else _os_id_clauses(params)[0],
+        'countries': _terms('country_code', params.getlist(P.COUNTRIES)),
+        'contributor_types': _terms('contrib_types',
+                                    params.getlist(P.CONTRIBUTOR_TYPES)),
+        'contributors': _contributors(params),
+        'lists': _terms('lists', params.getlist(P.LISTS)),
+        'boundary': _boundary(params),
+        'parent_company': _parent_company(params),
+        'facility_processing': _facility_processing(params),
+        'isic': _isic(params),
+        'product_type': _terms(
+            'product_type',
+            [clean(v) for v in params.getlist(P.PRODUCT_TYPE)]),
+        'number_of_workers': _terms('number_of_workers',
+                                    params.getlist(P.NUMBER_OF_WORKERS)),
+        'native_language_name': _native_language_name(params),
+        'sectors': _terms('sector', params.getlist(P.SECTOR)),
+        'claim_status': _claim_status(params),
+    }
+    return {key: clauses for key, clauses in groups.items() if clauses}
+
+
+def flatten(groups: Dict[str, List[dict]], without=()) -> List[dict]:
+    return [clause for key, clauses in groups.items() if key not in without
+            for clause in clauses]
+
+
+def build_filters(params) -> List[dict]:
+    return flatten(build_filter_groups(params))
 
 
 def build_query(params) -> dict:
@@ -229,7 +293,9 @@ def build_sort(sort_by: Optional[str]) -> List[dict]:
     """The legacy order_by, with os_id standing in for id."""
     name = [{'name.sort': 'asc'}, {'name_tiebreak': 'asc'}]
     os_id = [{'os_id': 'asc'}]
-    if sort_by in (None, 'contributors_desc'):
+    # 'relevance' without a text query has nothing to score: it orders
+    # like the default (ux/relevance.py handles it with a text query).
+    if sort_by in (None, 'contributors_desc', 'relevance'):
         return [{'contributors_count': 'desc'}, *name, *os_id]
     if sort_by == 'contributors_asc':
         return [{'contributors_count': 'asc'}, *name, *os_id]

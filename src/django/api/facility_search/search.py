@@ -7,11 +7,12 @@ result has another contributor (the `anonymised_only` flag). The page is
 then hydrated from Postgres by primary key so the response is serialized
 by the unchanged FacilityIndexSerializer.
 """
-from dataclasses import dataclass
-from typing import Iterable, List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from api.facility_search.index_definition import read_alias
 from api.facility_search.query import build_query, build_sort
+from api.facility_search.ux import relevance
 from api.models.facility.facility_index import FacilityIndex
 
 # index.max_result_window: deeper pages stay on Postgres.
@@ -22,8 +23,12 @@ Extent = Tuple[float, float, float, float]
 
 @dataclass
 class SearchPlan:
-    """A query built from request params, ready to run."""
-    body: dict
+    """
+    A query built from request params, ready to run: a request body, or
+    (scored search UX) the parameters of a stored search template.
+    """
+    body: Optional[dict] = None
+    template_params: Optional[dict] = None
 
 
 @dataclass
@@ -32,6 +37,8 @@ class SearchResult:
     ids: List[str]
     extent: Optional[Extent]
     has_downloadable: Optional[bool]
+    # {os_id: {field: fragment}}; scored searches only.
+    highlights: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
 
 def plan_search(params, sort_by: Optional[str], offset: int, size: int,
@@ -46,6 +53,9 @@ def plan_search(params, sort_by: Optional[str], offset: int, size: int,
         aggs['downloadable'] = {'terms': {
             'field': 'contributors_id', 'exclude': anonymised_ids, 'size': 1,
         }}
+    if relevance.wants_relevance(params, sort_by):
+        return SearchPlan(template_params=relevance.list_template_params(
+            params, offset, size, aggs))
     return SearchPlan(body={
         'query': build_query(params),
         'sort': build_sort(sort_by),
@@ -68,8 +78,12 @@ def parse_extent(aggregations: dict) -> Optional[Extent]:
 
 
 def execute(client, plan: SearchPlan, timeout: float) -> SearchResult:
-    response = client.search(index=read_alias(), body=plan.body,
-                             request_timeout=timeout)
+    if plan.template_params is not None:
+        response = relevance.execute_template(
+            client, read_alias(), plan.template_params, timeout)
+    else:
+        response = client.search(index=read_alias(), body=plan.body,
+                                 request_timeout=timeout)
     aggregations = response.get('aggregations', {})
     downloadable = aggregations.get('downloadable')
     return SearchResult(
@@ -78,6 +92,7 @@ def execute(client, plan: SearchPlan, timeout: float) -> SearchResult:
         extent=parse_extent(aggregations),
         has_downloadable=(None if downloadable is None
                           else bool(downloadable['buckets'])),
+        highlights=relevance.parse_highlights(response['hits']['hits']),
     )
 
 

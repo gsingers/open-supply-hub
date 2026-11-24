@@ -17,7 +17,8 @@ def legacy_search_queryset(params, sort_by):
     )
     order_list = []
 
-    if (sort_by is None) or (sort_by == 'contributors_desc'):
+    # 'relevance' needs OpenSearch; Postgres orders it like the default.
+    if sort_by in (None, 'contributors_desc', 'relevance'):
         order_list = ['-contributors_count', 'name']
     elif (sort_by == 'name_asc'):
         order_list = ['name']

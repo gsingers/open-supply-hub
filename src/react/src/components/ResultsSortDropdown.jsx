@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { string, func, shape, oneOfType, node } from 'prop-types';
+import { bool, string, func, shape, oneOfType, node } from 'prop-types';
 import { withRouter } from 'react-router';
 import { connect } from 'react-redux';
 
@@ -13,6 +13,7 @@ import {
 } from '../util/constants';
 import { updateSortAlgorithm } from '../actions/filters';
 import { fetchFacilities } from '../actions/facilities';
+import { isSearchUxActive, RELEVANCE_SORT } from '../util/searchUx';
 
 const selectStyles = {
     control: provided => ({
@@ -59,7 +60,15 @@ const ResultsSortDropdown = ({
     sortAlgorithm,
     initializeSort,
     updateSort,
+    searchUxActive,
+    hasSearchText,
 }) => {
+    // "Best match" needs search text and the search UX (OpenSearch).
+    const options = optionsForSortingResults.filter(
+        option =>
+            option.value !== RELEVANCE_SORT ||
+            (searchUxActive && hasSearchText),
+    );
     useEffect(() => {
         if (!sortAlgorithm) {
             initializeSort(optionsForSortingResults[DEFAULT_SORT_OPTION_INDEX]);
@@ -89,8 +98,8 @@ const ResultsSortDropdown = ({
                     }}
                     isSearchable={false}
                     value={sortAlgorithm}
-                    options={optionsForSortingResults}
-                    onChange={updateSort}
+                    options={options}
+                    onChange={v => updateSort(v, searchUxActive)}
                 />
             </Grid>
         </Grid>
@@ -112,19 +121,26 @@ ResultsSortDropdown.propTypes = {
     ]).isRequired,
     initializeSort: func.isRequired,
     updateSort: func.isRequired,
+    searchUxActive: bool.isRequired,
+    hasSearchText: bool.isRequired,
 };
 
-const mapStateToProps = ({ filters }) => ({
+const mapStateToProps = ({ filters, featureFlags: { flags } }) => ({
     sortAlgorithm: filters.sortAlgorithm,
+    searchUxActive: isSearchUxActive(flags),
+    hasSearchText: !!filters.facilityFreeTextQuery,
 });
 
 const mapDispatchToProps = (dispatch, { history: { push } }) => ({
     initializeSort: v => {
         dispatch(updateSortAlgorithm(v));
     },
-    updateSort: v => {
+    updateSort: (v, searchUxActive) => {
         dispatch(updateSortAlgorithm(v));
-        dispatch(fetchFacilities({ pushNewRoute: push }));
+        // With the search UX, the filter change itself runs the search.
+        if (!searchUxActive) {
+            dispatch(fetchFacilities({ pushNewRoute: push }));
+        }
     },
 });
 

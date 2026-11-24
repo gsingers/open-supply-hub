@@ -36,6 +36,8 @@ import {
 import { fetchFacilities } from '../actions/facilities';
 
 import MapIcon from './MapIcon';
+import useInstantSearch from './SearchUx/useInstantSearch';
+import { isSearchUxActive } from '../util/searchUx';
 import FacilitiesIcon from './FacilitiesIcon';
 
 const filterSidebarStyles = theme =>
@@ -98,9 +100,12 @@ const FilterSidebar = ({
     fetchLists,
     resetMergeState,
     refreshSearchResultsAfterMerge,
+    searchUxActive,
     theme,
     classes,
 }) => {
+    // Search UX: filters run the search as they change.
+    useInstantSearch(searchUxActive);
     /* eslint-disable react-hooks/exhaustive-deps */
     useEffect(() => {
         fetchFilterOptions();
@@ -306,6 +311,7 @@ FilterSidebar.defaultProps = {
 };
 
 FilterSidebar.propTypes = {
+    searchUxActive: bool.isRequired,
     fetchFilterOptions: func.isRequired,
     fetchingFeatureFlags: bool.isRequired,
     fetchingLists: bool.isRequired,
@@ -317,7 +323,7 @@ FilterSidebar.propTypes = {
 
 function mapStateToProps({
     ui: { activeFilterSidebarTab, filterModalOpen },
-    featureFlags: { fetching: fetchingFeatureFlags },
+    featureFlags: { fetching: fetchingFeatureFlags, flags },
     filterOptions: {
         lists: { fetching: fetchingLists },
     },
@@ -338,6 +344,7 @@ function mapStateToProps({
         facilitiesCount: get(facilities, 'count', null),
         merging,
         mergeError,
+        searchUxActive: isSearchUxActive(flags),
     };
 }
 

@@ -7,6 +7,11 @@ the default and any of them can be flipped at runtime without a deploy:
 * `map_opensearch_search` serves `/api/facilities/` (list, extent) and
   `/api/facilities/count/` from OpenSearch.
 * `map_opensearch_tiles` serves `facilitygrid` tiles from OpenSearch.
+* `map_search_ux` turns on the search UX (api/facility_search/ux):
+  facet counts, typeahead, the scored "Best match" sort and instant
+  search in the client. It needs OpenSearch, so it also serves the list
+  from OpenSearch. `MAP_SEARCH_UX_ENABLED` forces it on without the
+  switch (prototype stacks whose database must stay read-only).
 * `map_opensearch_shadow` keeps serving Postgres but also runs the
   OpenSearch query for a sample of requests and logs latency and diffs.
 
@@ -25,6 +30,7 @@ log = logging.getLogger(__name__)
 SEARCH_SWITCH = 'map_opensearch_search'
 TILES_SWITCH = 'map_opensearch_tiles'
 SHADOW_SWITCH = 'map_opensearch_shadow'
+UX_SWITCH = 'map_search_ux'
 
 
 class CircuitBreaker:
@@ -68,8 +74,19 @@ class CircuitBreaker:
 breaker = CircuitBreaker()
 
 
+def ux_switched_on() -> bool:
+    """The search UX is on, whatever the breaker says (for the client)."""
+    return (settings.MAP_SEARCH_UX_ENABLED
+            or switch_is_active(UX_SWITCH))
+
+
+def ux_enabled() -> bool:
+    return ux_switched_on() and breaker.allow()
+
+
 def search_enabled() -> bool:
-    return switch_is_active(SEARCH_SWITCH) and breaker.allow()
+    return ((switch_is_active(SEARCH_SWITCH) or ux_switched_on())
+            and breaker.allow())
 
 
 def tiles_enabled() -> bool:

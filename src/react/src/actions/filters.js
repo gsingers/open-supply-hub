@@ -27,6 +27,10 @@ export const updateClaimStatusFilter = createAction(
     'UPDATE_CLAIM_STATUS_FILTER',
 );
 export const updateSectorFilter = createAction('UPDATE_SECTOR_FILTER');
+// Search UX claim facet ('claimed' / 'unclaimed'; param claim_status).
+export const updateClaimStatusFacetFilter = createAction(
+    'UPDATE_CLAIM_STATUS_FACET_FILTER',
+);
 export const updateParentCompanyFilter = createAction(
     'UPDATE_PARENT_COMPANY_FILTER',
 );

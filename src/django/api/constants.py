@@ -45,6 +45,8 @@ class FacilitiesQueryParams:
     NATIVE_LANGUAGE_NAME = 'native_language_name'
     SECTOR = 'sectors'
     PARTNER_CONTRIBUTOR = 'partner_contributor'
+    # 'claimed' or 'unclaimed' (search UX facet; repeatable).
+    CLAIM_STATUS = 'claim_status'
 
 
 class FacilityListQueryParams:

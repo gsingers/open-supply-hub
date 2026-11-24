@@ -145,6 +145,13 @@ export default createReducer(
                         features: {
                             $push: get(payload, 'features', []),
                         },
+                        // Search UX: keep matched text for later pages too.
+                        highlights: {
+                            $set: {
+                                ...get(state, 'facilities.data.highlights', {}),
+                                ...get(payload, 'highlights', {}),
+                            },
+                        },
                     },
                     nextPageURL: { $set: get(payload, 'next', null) },
                     isInfiniteLoading: { $set: false },

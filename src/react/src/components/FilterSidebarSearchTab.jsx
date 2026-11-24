@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { array, bool, func, string } from 'prop-types';
+import { array, bool, func, number, string } from 'prop-types';
 import { connect } from 'react-redux';
 import { withRouter } from 'react-router';
 import Button from '@material-ui/core/Button';
@@ -16,6 +16,11 @@ import ContributorFilter from './Filters/ContributorFilter';
 import CountryNameFilter from './Filters/CountryNameFilter';
 import SectorFilter from './Filters/SectorFilter';
 import FilterSidebarExtendedSearch from './FilterSidebarExtendedSearch';
+import IsicSearch from './Filters/IsicSearch';
+import UnifiedSearchBox from './SearchUx/UnifiedSearchBox';
+import FacetPanel from './SearchUx/FacetPanel';
+import ActiveFilterChips from './SearchUx/ActiveFilterChips';
+import { isSearchUxActive } from '../util/searchUx';
 import DataPartnersFilter from './Filters/DataPartnersFilter/DataPartnersFilter';
 
 import {
@@ -133,6 +138,10 @@ function FilterSidebarSearchTab({
     classes,
     embedExtendedFields,
     partnerContributors,
+    searchUxActive,
+    facetsUnavailable,
+    liveTotal,
+    facetsFetching,
 }) {
     const filterListHeight = useFilterListHeight();
     const processingTypeSearchRef = useRef(null);
@@ -198,6 +207,10 @@ function FilterSidebarSearchTab({
     );
 
     const searchResetButtonGroup = () => {
+        if (searchUxActive) {
+            // Instant search: no Search button, only reset.
+            return checkIfAnyFieldSelected(allFields) ? resetButton : null;
+        }
         if (fetchingFacilities) {
             return <CircularProgress size={30} />;
         }
@@ -219,23 +232,67 @@ function FilterSidebarSearchTab({
                 style={{ height: filterListHeight }}
             >
                 <div className={classes.filtersDiv}>
-                    <TextSearchFilter
-                        searchForFacilities={searchForFacilities}
-                    />
-                    <ContributorFilter />
-                    <CountryNameFilter />
-                    <SectorFilter />
-                    <ShowOnly when={!embed}>
-                        <FeatureFlag
-                            flag={PRIVATE_INSTANCE}
-                            alternative={<DataPartnersFilter />}
-                        >
-                            <></>
-                        </FeatureFlag>
-                    </ShowOnly>
-                    <FilterSidebarExtendedSearch
-                        ref={processingTypeSearchRef}
-                    />
+                    {searchUxActive ? (
+                        <>
+                            <UnifiedSearchBox />
+                            <div
+                                className={classes.font}
+                                role="status"
+                                aria-live="polite"
+                                style={{ margin: '0 0 8px', fontWeight: 600 }}
+                            >
+                                {liveTotal === null
+                                    ? '\u00a0'
+                                    : `${liveTotal.toLocaleString()} production locations`}
+                                {facetsFetching && (
+                                    <CircularProgress
+                                        size={12}
+                                        style={{ marginLeft: 8 }}
+                                    />
+                                )}
+                            </div>
+                            <ActiveFilterChips />
+                            {facetsUnavailable ? (
+                                <>
+                                    <ContributorFilter />
+                                    <CountryNameFilter />
+                                    <SectorFilter />
+                                    <FilterSidebarExtendedSearch
+                                        ref={processingTypeSearchRef}
+                                    />
+                                </>
+                            ) : (
+                                <>
+                                    <FacetPanel />
+                                    <ShowOnly when={!embed}>
+                                        <IsicSearch
+                                            disabled={fetchingFacilities}
+                                        />
+                                    </ShowOnly>
+                                </>
+                            )}
+                        </>
+                    ) : (
+                        <>
+                            <TextSearchFilter
+                                searchForFacilities={searchForFacilities}
+                            />
+                            <ContributorFilter />
+                            <CountryNameFilter />
+                            <SectorFilter />
+                            <ShowOnly when={!embed}>
+                                <FeatureFlag
+                                    flag={PRIVATE_INSTANCE}
+                                    alternative={<DataPartnersFilter />}
+                                >
+                                    <></>
+                                </FeatureFlag>
+                            </ShowOnly>
+                            <FilterSidebarExtendedSearch
+                                ref={processingTypeSearchRef}
+                            />
+                        </>
+                    )}
                 </div>
             </div>
 
@@ -288,6 +345,13 @@ function FilterSidebarSearchTab({
     );
 }
 
+FilterSidebarSearchTab.defaultProps = {
+    searchUxActive: false,
+    facetsUnavailable: false,
+    liveTotal: null,
+    facetsFetching: false,
+};
+
 FilterSidebarSearchTab.propTypes = {
     resetFilters: func.isRequired,
     facilityFreeTextQuery: string.isRequired,
@@ -301,6 +365,10 @@ FilterSidebarSearchTab.propTypes = {
     fetchingFacilities: bool.isRequired,
     searchForFacilities: func.isRequired,
     fetchingOptions: bool.isRequired,
+    searchUxActive: bool,
+    facetsUnavailable: bool,
+    liveTotal: number,
+    facetsFetching: bool,
     vectorTileFlagIsActive: bool.isRequired,
     partnerContributors: array.isRequired,
 };
@@ -330,6 +398,7 @@ function mapStateToProps({
     },
     featureFlags,
     embeddedMap: { embed, config },
+    searchUx: { facets },
 }) {
     const vectorTileFlagIsActive = get(
         featureFlags,
@@ -356,6 +425,10 @@ function mapStateToProps({
         embed: !!embed,
         embedExtendedFields: config.extended_fields,
         partnerContributors,
+        searchUxActive: isSearchUxActive(featureFlags.flags),
+        facetsUnavailable: facets.unavailable,
+        liveTotal: facets.data ? facets.data.total : null,
+        facetsFetching: facets.fetching,
     };
 }
 
