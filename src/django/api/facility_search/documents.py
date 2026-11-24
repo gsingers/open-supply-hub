@@ -2,6 +2,7 @@
 from typing import Iterable
 
 from django.db import connection
+from django.db.models.expressions import RawSQL
 from unidecode import unidecode
 
 from api.facility_search.index_definition import (
@@ -30,7 +31,9 @@ UNVERSIONED = 0
 
 def indexable_rows():
     """The rows the legacy search reads: FacilityIndex minus candidates."""
-    return FacilityIndex.objects.without_candidates().values(*ROW_FIELDS)
+    return FacilityIndex.objects.without_candidates().annotate(
+        name_search=RawSQL('UPPER(UNACCENT(api_facilityindex.name))', []),
+    ).values(*ROW_FIELDS, 'name_search')
 
 
 def fetch_rows(facility_ids: Iterable[str]) -> dict:
@@ -61,6 +64,7 @@ def build_document(row: dict) -> dict:
     document = {
         'os_id': row['id'],
         'name': row['name'],
+        'name_search': row['name_search'],
         'name_tiebreak': collation_tiebreak(row['name']),
         'native_language_name': row['native_language_name'] or [],
         'processing_type': row['processing_type'] or [],

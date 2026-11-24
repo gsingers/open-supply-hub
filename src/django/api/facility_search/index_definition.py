@@ -82,10 +82,10 @@ ANALYSIS = {
         },
     },
     'analyzer': {
-        'folded_trigram': {
+        # For text already folded by Postgres (see name_search).
+        'plain_trigram': {
             'type': 'custom',
             'tokenizer': 'trigram',
-            'filter': ['lowercase', 'asciifolding'],
         },
         'lowercase_trigram': {
             'type': 'custom',
@@ -94,10 +94,6 @@ ANALYSIS = {
         },
     },
     'normalizer': {
-        'folded': {
-            'type': 'custom',
-            'filter': ['lowercase', 'asciifolding'],
-        },
         'lowercase': {
             'type': 'custom',
             'filter': ['lowercase'],
@@ -117,9 +113,18 @@ def _mappings():
         'name': {
             'type': 'keyword',
             'fields': {
-                'trigram': {'type': 'text', 'analyzer': 'folded_trigram'},
-                'folded': {'type': 'keyword', 'normalizer': 'folded'},
                 'sort': {'type': 'keyword', 'normalizer': 'collation_key'},
+            },
+        },
+        # UPPER(UNACCENT(name)) computed by Postgres when the document is
+        # built, so q matches exactly what the legacy
+        # UPPER(UNACCENT(name)) LIKE UPPER(UNACCENT('%q%')) matches:
+        # decomposed accents, one-to-many folds (ß, Æ) and symbols
+        # UNACCENT rewrites (®) included. Queries are folded the same way.
+        'name_search': {
+            'type': 'keyword',
+            'fields': {
+                'trigram': {'type': 'text', 'analyzer': 'plain_trigram'},
             },
         },
         # Breaks ties between names equal under name.sort the way the

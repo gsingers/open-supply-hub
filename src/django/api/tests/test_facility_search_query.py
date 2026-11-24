@@ -33,27 +33,37 @@ class UnsupportedParamsTest(TestCase):
 
 class FreeTextTest(TestCase):
     def test_q_is_a_substring_match_or_an_exact_id(self):
-        (clause,) = filters('q=Textile')
+        # Folded with Postgres' own UPPER(UNACCENT()), like the legacy
+        # ILIKE, and matched against a name folded the same way.
+        (clause,) = filters('q=Téxtile')
 
         self.assertEqual(clause, {'bool': {'should': [
-            {'match_phrase': {'name.trigram': 'Textile'}},
-            {'term': {'os_id': 'Textile'}},
+            {'match_phrase': {'name_search.trigram': 'TEXTILE'}},
+            {'term': {'os_id': 'Téxtile'}},
         ], 'minimum_should_match': 1}})
 
     def test_short_q_uses_a_folded_wildcard(self):
-        (clause,) = filters('q=Ü*')
+        (clause,) = filters('q=ü*')
 
         self.assertEqual(clause['bool']['should'][0], {'wildcard': {
-            'name.folded': {'value': '*ü\\**', 'case_insensitive': True},
+            'name_search': {'value': '*U\\**'},
         }})
+
+    def test_folds_that_expand_are_measured_after_folding(self):
+        # ß folds to SS, so a one-character query becomes a trigram-length
+        # one only when it expands past three characters.
+        (clause,) = filters('q=æß')
+
+        self.assertEqual(clause['bool']['should'][0], {'match_phrase': {
+            'name_search.trigram': 'AESS'}})
 
     def test_short_non_latin_q_is_not_transliterated(self):
         # Postgres UNACCENT strips accents but keeps other scripts.
-        for text, value in (('中', '*中*'), ('Б', '*б*'), ('Éa', '*éa*')):
+        for text, value in (('中', '*中*'), ('б', '*Б*'), ('éa', '*EA*')):
             with self.subTest(text):
                 (clause,) = filters(f'q={text}')
                 self.assertEqual(
-                    clause['bool']['should'][0]['wildcard']['name.folded']
+                    clause['bool']['should'][0]['wildcard']['name_search']
                     ['value'], value)
 
     def test_empty_q_matches_everything(self):

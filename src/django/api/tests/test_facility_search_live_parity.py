@@ -17,12 +17,19 @@ NAMES = [
     'Textile Plant 3', 'Plant 7 Textiles', 'Café Nguyễn', 'a b', 'A-B',
     'Ab', 'AB', 'ab', 'Zeta Knitwear', '3M Plant', 'Ünal Tekstil',
     '(Bracketed) Mill', 'Mill 30', 'Фабрика Б', '中国工厂', 'École Ab',
+    # Folding edge cases found on the full dataset: decomposed accents,
+    # one-to-many folds and symbols UNACCENT rewrites.
+    'I\u0307stanbul Tekstil', 'Grosse Strasse', 'Straße Mode',
+    'Æble Fabrik', 'Øster Mill', 'Brand® Mill', 'Ä\u0308rmel Gmbh',
 ]
 
 QUERIES = [
     '', 'q=textile', 'q=TEX', 'q=plant 3', 'q=plant 7', 'q=nguyen',
     'q=cafe', 'q=ab', 'q=a', 'q=3', 'q=unal', 'q=mill 3', 'q=-b',
-    'q=Б', 'q=б', 'q=中', 'q=中国', 'q=é', 'q=E', 'q=ÉC', 'q=фаб',
+    'q=Б', 'q=б', 'q=中', 'q=中國', 'q=é', 'q=E', 'q=ÉC', 'q=фаб',
+    'q=istanbul', 'q=Istan', 'q=strasse', 'q=STRAßE', 'q=ss', 'q=aeble',
+    'q=Æb', 'q=ble', 'q=oster', 'q=(R)', 'q=d® m', 'q=d(r) m', 'q=armel',
+    'q=ä',
     'sort_by=name_asc', 'sort_by=name_desc', 'sort_by=contributors_asc',
     'countries=TR', 'countries=VN&countries=TR',
     'boundary={"type":"Polygon","coordinates":'

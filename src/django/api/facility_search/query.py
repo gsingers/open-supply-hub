@@ -12,6 +12,7 @@ import re
 from typing import List, Optional
 
 from django.contrib.gis.geos import GEOSException, GEOSGeometry, Polygon
+from django.db import connection
 
 from api.constants import FacilitiesQueryParams as P
 from api.facility_search.index_definition import NGRAM_SIZE
@@ -37,21 +38,36 @@ def _any_of(*clauses) -> dict:
     return {'bool': {'should': list(clauses), 'minimum_should_match': 1}}
 
 
-def _substring(field: str, text: str, folded: bool) -> dict:
+def fold_like_postgres(text: str) -> str:
+    """UPPER(UNACCENT(text)), computed by Postgres itself."""
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT UPPER(UNACCENT(%s))', [text])
+        return cursor.fetchone()[0]
+
+
+def _wildcard_contains(field: str, value: str, **options) -> dict:
+    escaped = WILDCARD_SPECIAL.sub(r'\\\1', value)
+    return {'wildcard': {field: {'value': f'*{escaped}*', **options}}}
+
+
+def _name_substring(text: str) -> dict:
     """
-    ILIKE '%text%' on a keyword with a trigram subfield. Short terms use a
-    wildcard on the normalized keyword; the field's normalizer folds the
-    pattern the same way as the indexed value (lowercase, and ASCII
-    folding of accents for `folded`), which, like UNACCENT, leaves other
-    scripts alone.
+    The legacy UPPER(UNACCENT(name)) LIKE UPPER(UNACCENT('%text%')), on a
+    name_search field holding UPPER(UNACCENT(name)) from Postgres: a
+    phrase of trigrams, or a wildcard for terms shorter than a trigram.
     """
+    folded = fold_like_postgres(text)
+    if len(folded) >= NGRAM_SIZE:
+        return {'match_phrase': {'name_search.trigram': folded}}
+    return _wildcard_contains('name_search', folded)
+
+
+def _native_name_substring(text: str) -> dict:
+    """ILIKE '%text%' on the native names (no UNACCENT in the legacy)."""
     if len(text) >= NGRAM_SIZE:
-        return {'match_phrase': {f'{field}.trigram': text}}
-    subfield = 'folded' if folded else 'lowercase'
-    return {'wildcard': {f'{field}.{subfield}': {
-        'value': '*' + WILDCARD_SPECIAL.sub(r'\\\1', text.lower()) + '*',
-        'case_insensitive': True,
-    }}}
+        return {'match_phrase': {'native_language_name.trigram': text}}
+    return _wildcard_contains('native_language_name.lowercase',
+                              text.lower(), case_insensitive=True)
 
 
 def _resolve_os_id(os_id: str) -> Optional[str]:
@@ -77,7 +93,7 @@ def _id_and_text(params) -> List[dict]:
     # `name` is the deprecated spelling of `q`; both may be given.
     for value in (text, params.get(P.NAME)):
         if value:
-            clauses.append(_any_of(_substring('name', value, folded=True),
+            clauses.append(_any_of(_name_substring(value),
                                    {'term': {'os_id': value}}))
     return clauses
 
@@ -175,7 +191,7 @@ def _native_language_name(params) -> List[dict]:
         return []  # ILIKE '%%' matches every row
     if ARRAY_TEXT_SYNTAX.search(text):
         raise UnsupportedQuery('native_language_name: array syntax')
-    return [_substring('native_language_name', text, folded=False)]
+    return [_native_name_substring(text)]
 
 
 def _check_supported(params) -> None:
